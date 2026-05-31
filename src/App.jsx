@@ -132,7 +132,7 @@ export default function App() {
 	const [isFetchingBalance, setIsFetchingBalance] = useState(false);
 
 	// Iterations limit setting state
-	const [maxIterations, setMaxIterations] = useState(15);
+	const [maxIterations, setMaxIterations] = useState(50);
 
 	// Active session key for persistent global-only conversations
 	const [activeSessionKey, setActiveSessionKey] = useState("global_chat_history");
@@ -425,7 +425,7 @@ export default function App() {
 			});
 			setChatMetadata(loadedMeta);
 			setApiKeyMissing(!result.apiKey);
-			setMaxIterations(result.maxIterations !== undefined ? parseInt(result.maxIterations) : 15);
+			setMaxIterations(result.maxIterations !== undefined ? parseInt(result.maxIterations) : 50);
 		});
 	}
 
@@ -554,7 +554,7 @@ export default function App() {
 				maxTokens: parseInt(maxTokens) || 2048,
 				enableThinking: enableThinking,
 				reasoningEffort: reasoningEffort,
-				maxIterations: parseInt(maxIterations) || 15,
+				maxIterations: parseInt(maxIterations) || 50,
 				showToolCallsDetail: showToolCallsDetail,
 			},
 			() => {
@@ -1402,11 +1402,25 @@ END OF DEBUG COMPILATION
 			}
 
 			if (retryCount >= maxIterations) {
-				addLocalMessage("assistant", "⚠️ **Agent Iteration limit:** Executed too many recursive actions without summary.");
+				const finalMessages = [
+					...activeMessages,
+					{
+						role: "assistant",
+						content: "⚠️ **Agent Iteration limit:** Executed too many recursive actions without summary.",
+					},
+				];
+				saveMessageLog(finalMessages);
 			}
 		} catch (err) {
 			console.error(err);
-			addLocalMessage("assistant", `❌ **API Connection Error:** ${err.message}`);
+			const finalMessages = [
+				...activeMessages,
+				{
+					role: "assistant",
+					content: `❌ **API Connection Error:** ${err.message}`,
+				},
+			];
+			saveMessageLog(finalMessages);
 		} finally {
 			setIsGenerating(false);
 			setLockedChatKey(null);
