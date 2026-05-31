@@ -1353,7 +1353,7 @@ END OF DEBUG COMPILATION
 				}
 
 				if (attachTools) {
-					const activeTools = agentTools.filter((t) => enabledTools[t.function.name] !== false);
+					const activeTools = agentTools.filter((t) => t.function.name === "url_changing" || enabledTools[t.function.name] !== false);
 					if (activeTools.length > 0) {
 						requestPayload.tools = activeTools;
 						requestPayload.tool_choice = "auto";

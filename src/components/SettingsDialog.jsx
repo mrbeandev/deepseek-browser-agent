@@ -81,7 +81,8 @@ const AVAILABLE_TOOLS = [
 	{
 		key: "url_changing",
 		name: "URL Change Guard",
-		desc: "Suppresses human-tab-switch warnings for active tasks."
+		desc: "Suppresses human-tab-switch warnings for active tasks.",
+		required: true
 	},
 	{
 		key: "get_device_details",
@@ -328,14 +329,18 @@ export const SettingsDialog = ({
 						{AVAILABLE_TOOLS.map((tool) => (
 							<div key={tool.key} className="flex items-start justify-between gap-3 p-2.5 border border-zinc-900 bg-zinc-950/40 rounded-xl transition-colors hover:border-zinc-800/80">
 								<div className="flex flex-col gap-1 flex-1 text-left">
-									<div className="flex items-center gap-1.5">
+									<div className="flex flex-wrap items-center gap-1.5">
 										<span className="text-[11px] font-bold text-zinc-200">{tool.name}</span>
+										{tool.required && (
+											<span className="rounded bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-blue-400 select-none leading-none">Required</span>
+										)}
 										<span className="text-[11px] font-mono text-zinc-550 bg-zinc-950 border border-zinc-900 px-1 py-0.5 rounded select-all leading-none">{tool.key}</span>
 									</div>
 									<span className="text-[11px] text-zinc-400 leading-normal">{tool.desc}</span>
 								</div>
 								<Switch
-									checked={enabledTools[tool.key] !== false}
+									checked={tool.required ? true : (enabledTools[tool.key] !== false)}
+									disabled={tool.required}
 									onCheckedChange={(checked) => {
 										setEnabledTools((prev) => ({
 											...prev,
