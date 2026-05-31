@@ -83,6 +83,22 @@ export default function App() {
 	const [reasoningEffort, setReasoningEffort] = useState("medium");
 	const [showToolCallsDetail, setShowToolCallsDetail] = useState(false);
 
+	// Tools permissions state
+	const [enabledTools, setEnabledTools] = useState({
+		get_page_summary_content: true,
+		extract_all_links: true,
+		query_dom_elements: true,
+		click_element: true,
+		fill_input: true,
+		scroll_to_element: true,
+		navigate_to: true,
+		highlight_text: true,
+		list_open_tabs: true,
+		switch_to_tab: true,
+		url_changing: true,
+		get_device_details: true,
+	});
+
 	// Tab states
 	const [activeTabId, setActiveTabId] = useState(null);
 	const [activeDomain, setActiveDomain] = useState("loading...");
@@ -412,7 +428,10 @@ export default function App() {
 
 	// Read settings from storage
 	function loadSettings() {
-		chrome.storage.local.get(["apiKey", "endpoint", "model", "systemPrompt", "temperature", "maxTokens", "chats", "chatMetadata", "enableThinking", "reasoningEffort", "maxIterations", "activeSessionKey", "theme", "showToolCallsDetail"], (result) => {
+		chrome.storage.local.get(["apiKey", "endpoint", "model", "systemPrompt", "temperature", "maxTokens", "chats", "chatMetadata", "enableThinking", "reasoningEffort", "maxIterations", "activeSessionKey", "theme", "showToolCallsDetail", "enabledTools"], (result) => {
+			if (result.enabledTools) {
+				setEnabledTools(result.enabledTools);
+			}
 			setApiKey(result.apiKey || "");
 			setEndpoint(result.endpoint || "https://api.deepseek.com");
 			setModel(result.model || "deepseek-v4-flash");
@@ -662,6 +681,7 @@ export default function App() {
 				reasoningEffort: reasoningEffort,
 				maxIterations: parseInt(maxIterations) || 50,
 				showToolCallsDetail: showToolCallsDetail,
+				enabledTools: enabledTools,
 			},
 			() => {
 				setApiKeyMissing(!trimmedKey);
@@ -1333,8 +1353,11 @@ END OF DEBUG COMPILATION
 				}
 
 				if (attachTools) {
-					requestPayload.tools = agentTools;
-					requestPayload.tool_choice = "auto";
+					const activeTools = agentTools.filter((t) => enabledTools[t.function.name] !== false);
+					if (activeTools.length > 0) {
+						requestPayload.tools = activeTools;
+						requestPayload.tool_choice = "auto";
+					}
 				}
 
 				const response = await fetch(`${endpoint}/chat/completions`, {
@@ -2958,6 +2981,8 @@ END OF DEBUG COMPILATION
 					handleDeleteSession={handleDeleteSession}
 					handleLoadSession={handleLoadSession}
 					getChatKey={getChatKey}
+					enabledTools={enabledTools}
+					setEnabledTools={setEnabledTools}
 				/>
 			</div>
 		</TooltipProvider>

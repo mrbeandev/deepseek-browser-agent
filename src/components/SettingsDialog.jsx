@@ -12,6 +12,7 @@ import {
 	Trash2,
 	Compass,
 	AlertTriangle,
+	Cpu,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -25,6 +26,69 @@ import {
 	SelectContent,
 	SelectItem,
 } from "./ui/select";
+
+const AVAILABLE_TOOLS = [
+	{
+		key: "get_page_summary_content",
+		name: "Scrape Page Text",
+		desc: "Extracts the readable text content from the active webpage."
+	},
+	{
+		key: "extract_all_links",
+		name: "Extract Links",
+		desc: "Collects and lists all hyperlinks found on the webpage."
+	},
+	{
+		key: "query_dom_elements",
+		name: "Query DOM Structure",
+		desc: "Queries interactive elements on the page via CSS selectors."
+	},
+	{
+		key: "click_element",
+		name: "Click Element",
+		desc: "Clicks buttons, links, or form elements dynamically."
+	},
+	{
+		key: "fill_input",
+		name: "Fill Input Fields",
+		desc: "Types text values directly into inputs or textareas."
+	},
+	{
+		key: "scroll_to_element",
+		name: "Scroll Page",
+		desc: "Scrolls the page up, down, or to a specific selector."
+	},
+	{
+		key: "navigate_to",
+		name: "Navigate Tab URL",
+		desc: "Navigates the active browser tab to a different URL."
+	},
+	{
+		key: "highlight_text",
+		name: "Highlight Keyword Matches",
+		desc: "Finds and highlights search terms in the active DOM."
+	},
+	{
+		key: "list_open_tabs",
+		name: "List Open Tabs",
+		desc: "Lists all open browser tabs, URLs, and titles."
+	},
+	{
+		key: "switch_to_tab",
+		name: "Switch Tab Focus",
+		desc: "Activates and focuses another open browser tab."
+	},
+	{
+		key: "url_changing",
+		name: "URL Change Guard",
+		desc: "Suppresses human-tab-switch warnings for active tasks."
+	},
+	{
+		key: "get_device_details",
+		name: "Device & Privacy Details",
+		desc: "Exposes host OS, CPU core counts, localization, and connection."
+	}
+];
 
 export const SettingsDialog = ({
 	showSettings,
@@ -71,6 +135,8 @@ export const SettingsDialog = ({
 	handleDeleteSession,
 	handleLoadSession,
 	getChatKey,
+	enabledTools,
+	setEnabledTools,
 }) => {
 	return (
 		<div className={`absolute right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border bg-[#07090e] shadow-2xl transition-transform duration-300 ease-out ${showSettings ? "translate-x-0" : "translate-x-full"}`}>
@@ -81,15 +147,19 @@ export const SettingsDialog = ({
 				</Button>
 			</div>
 
-			{/* Tab selection for Settings Preferences vs Saved Sessions */}
+			{/* Tab selection for Settings Preferences vs Tools vs Saved Sessions */}
 			<div className="border-zinc-850 flex shrink-0 border-b bg-zinc-950/20 px-2 py-1">
-				<button onClick={() => setSettingsTab("preferences")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "preferences" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
+				<button onClick={() => setSettingsTab("preferences")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "preferences" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
 					<SettingsIcon className="h-3.5 w-3.5" />
 					<span>Preferences</span>
 				</button>
-				<button onClick={() => setSettingsTab("sessions")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "sessions" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "text-zinc-555 border border-transparent bg-transparent hover:text-zinc-300"}`}>
+				<button onClick={() => setSettingsTab("tools")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "tools" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
+					<Cpu className="h-3.5 w-3.5" />
+					<span>Tools</span>
+				</button>
+				<button onClick={() => setSettingsTab("sessions")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "sessions" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "text-zinc-555 border border-transparent bg-transparent hover:text-zinc-300"}`}>
 					<History className="h-3.5 w-3.5" />
-					<span>Saved Sessions</span>
+					<span>Sessions</span>
 				</button>
 			</div>
 
@@ -250,6 +320,32 @@ export const SettingsDialog = ({
 
 						{saveSuccess && <div className="animate-fade-in text-center text-xs text-emerald-400">✓ Configuration updated!</div>}
 					</>
+				) : settingsTab === "tools" ? (
+					<div className="flex flex-col gap-3 p-1">
+						<div className="text-[10px] text-zinc-400 leading-relaxed mb-1 border-b border-zinc-850 pb-2 text-left">
+							Toggle individual capabilities to control the agent's action boundaries and privacy permissions. Disabled tools will be completely hidden from the AI models.
+						</div>
+						{AVAILABLE_TOOLS.map((tool) => (
+							<div key={tool.key} className="flex items-start justify-between gap-3 p-2.5 border border-zinc-900 bg-zinc-950/40 rounded-xl transition-colors hover:border-zinc-800/80">
+								<div className="flex flex-col gap-1 flex-1 text-left">
+									<div className="flex items-center gap-1.5">
+										<span className="text-[10px] font-bold text-zinc-200">{tool.name}</span>
+										<span className="text-[7.5px] font-mono text-zinc-550 bg-zinc-950 border border-zinc-900 px-1 py-0.5 rounded select-all leading-none">{tool.key}</span>
+									</div>
+									<span className="text-[9px] text-zinc-400 leading-normal">{tool.desc}</span>
+								</div>
+								<Switch
+									checked={enabledTools[tool.key] !== false}
+									onCheckedChange={(checked) => {
+										setEnabledTools((prev) => ({
+											...prev,
+											[tool.key]: checked,
+										}));
+									}}
+								/>
+							</div>
+						))}
+					</div>
 				) : (
 					<div className="flex flex-col gap-2 p-1">
 						{Object.values(chatMetadata).length > 0 && (
