@@ -149,15 +149,15 @@ export const SettingsDialog = ({
 
 			{/* Tab selection for Settings Preferences vs Tools vs Saved Sessions */}
 			<div className="border-zinc-850 flex shrink-0 border-b bg-zinc-950/20 px-2 py-1">
-				<button onClick={() => setSettingsTab("preferences")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "preferences" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
+				<button onClick={() => setSettingsTab("preferences")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "preferences" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
 					<SettingsIcon className="h-3.5 w-3.5" />
 					<span>Preferences</span>
 				</button>
-				<button onClick={() => setSettingsTab("tools")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "tools" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
+				<button onClick={() => setSettingsTab("tools")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "tools" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
 					<Cpu className="h-3.5 w-3.5" />
 					<span>Tools</span>
 				</button>
-				<button onClick={() => setSettingsTab("sessions")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[9px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "sessions" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "text-zinc-555 border border-transparent bg-transparent hover:text-zinc-300"}`}>
+				<button onClick={() => setSettingsTab("sessions")} className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "sessions" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "text-zinc-555 border border-transparent bg-transparent hover:text-zinc-300"}`}>
 					<History className="h-3.5 w-3.5" />
 					<span>Sessions</span>
 				</button>
@@ -167,7 +167,7 @@ export const SettingsDialog = ({
 				{settingsTab === "preferences" ? (
 					<>
 						<div className="flex flex-col gap-1.5">
-							<label className="text-[10px] font-bold text-zinc-400">Deepseek API Key</label>
+							<label className="text-[11px] font-bold text-zinc-400">Deepseek API Key</label>
 							<div className="relative flex items-center">
 								<Input type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="placeholder-zinc-750 border-zinc-800 bg-zinc-950/40 pr-10 font-mono text-xs text-white focus-visible:ring-blue-600/35" />
 								<Button type="button" variant="ghost" size="icon-xs" onClick={() => setShowKey(!showKey)} className="text-zinc-550 absolute right-1 hover:bg-transparent hover:text-zinc-200">
@@ -177,7 +177,7 @@ export const SettingsDialog = ({
 
 							{/* Test API Key Connection Button & Status */}
 							<div className="mt-1 flex items-center justify-between">
-								<Button type="button" variant="outline" size="xs" onClick={handleTestApiKey} disabled={isTestingKey} className="hover:bg-zinc-850 h-6 rounded border-zinc-800 bg-zinc-900/60 px-2.5 text-[10px] font-bold text-zinc-300 transition-all hover:text-white">
+								<Button type="button" variant="outline" size="xs" onClick={handleTestApiKey} disabled={isTestingKey} className="hover:bg-zinc-850 h-6 rounded border-zinc-800 bg-zinc-900/60 px-2.5 text-[11px] font-bold text-zinc-300 transition-all hover:text-white">
 									{isTestingKey ? (
 										<>
 											<Loader2 className="mr-1 h-3 w-3 animate-spin text-blue-500" />
@@ -189,7 +189,7 @@ export const SettingsDialog = ({
 								</Button>
 
 								{testResult && (
-									<div className={`animate-fade-in flex items-center gap-1 text-[10px] font-medium ${testResult.success ? "text-emerald-400" : "text-rose-400"}`}>
+									<div className={`animate-fade-in flex items-center gap-1 text-[11px] font-medium ${testResult.success ? "text-emerald-400" : "text-rose-400"}`}>
 										{testResult.success ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-rose-500" />}
 										<span className="max-w-[130px] truncate" title={testResult.message}>
 											{testResult.message}
@@ -203,21 +203,21 @@ export const SettingsDialog = ({
 						{apiBalance ? (
 							<div className="animate-fade-in mt-0.5 flex flex-col gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-2.5">
 								<div className="flex items-center justify-between">
-									<span className="text-[10px] font-bold text-zinc-400">Deepseek Balance</span>
-									<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 font-mono text-[10px] text-blue-400 transition-colors hover:text-blue-300 disabled:opacity-50">
+									<span className="text-[11px] font-bold text-zinc-400">Deepseek Balance</span>
+									<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 font-mono text-[11px] text-blue-400 transition-colors hover:text-blue-300 disabled:opacity-50">
 										<span>{isFetchingBalance ? "Refreshing..." : "Refresh"}</span>
 									</button>
 								</div>
 								<div className="mt-0.5 flex items-baseline gap-1">
 									<span className="text-zinc-150 font-mono text-sm font-extrabold">{apiBalance.total}</span>
-									<span className="font-mono text-[10px] font-bold text-zinc-500">{apiBalance.currency}</span>
-									{!apiBalance.available && <span className="ml-2 rounded-sm border border-rose-500/20 bg-rose-500/10 px-1 text-[10px] font-bold text-rose-400">UNAVAILABLE</span>}
+									<span className="font-mono text-[11px] font-bold text-zinc-500">{apiBalance.currency}</span>
+									{!apiBalance.available && <span className="ml-2 rounded-sm border border-rose-500/20 bg-rose-500/10 px-1 text-[11px] font-bold text-rose-400">UNAVAILABLE</span>}
 								</div>
 							</div>
 						) : (
 							apiKey && (
 								<div className="mt-0.5 flex justify-end">
-									<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="cursor-pointer border-none bg-transparent p-0 font-mono text-[10px] text-zinc-500 transition-colors hover:text-zinc-300 disabled:opacity-50">
+									<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="cursor-pointer border-none bg-transparent p-0 font-mono text-[11px] text-zinc-500 transition-colors hover:text-zinc-300 disabled:opacity-50">
 										{isFetchingBalance ? "Loading balance..." : "Show current balance"}
 									</button>
 								</div>
@@ -225,12 +225,12 @@ export const SettingsDialog = ({
 						)}
 
 						<div className="flex flex-col gap-1.5">
-							<label className="text-[10px] font-bold text-zinc-400">API Endpoint</label>
+							<label className="text-[11px] font-bold text-zinc-400">API Endpoint</label>
 							<Input type="text" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35" />
 						</div>
 
 						<div className="flex flex-col gap-1.5">
-							<label className="text-[10px] font-bold text-zinc-400">Preferred AI Model</label>
+							<label className="text-[11px] font-bold text-zinc-400">Preferred AI Model</label>
 							<Select value={model} onValueChange={(val) => setModel(val)}>
 								<SelectTrigger className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
 									<SelectValue placeholder="Select model" />
@@ -250,15 +250,15 @@ export const SettingsDialog = ({
 						<div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
 							<div className="flex items-center justify-between">
 								<div className="flex flex-col gap-0.5">
-									<label className="text-[10px] font-bold text-zinc-400">Enable Deep Thinking</label>
-									<span className="text-[10px] text-zinc-500">Stream reasoning CoT block</span>
+									<label className="text-[11px] font-bold text-zinc-400">Enable Deep Thinking</label>
+									<span className="text-[11px] text-zinc-500">Stream reasoning CoT block</span>
 								</div>
 								<Switch checked={enableThinking} onCheckedChange={(checked) => setEnableThinking(checked)} />
 							</div>
 
 							{enableThinking && (
 								<div className="animate-fade-in mt-2 flex flex-col gap-1.5">
-									<label className="text-[10px] font-bold text-zinc-400">Reasoning Effort</label>
+									<label className="text-[11px] font-bold text-zinc-400">Reasoning Effort</label>
 									<Select value={reasoningEffort} onValueChange={(val) => setReasoningEffort(val)}>
 										<SelectTrigger className="h-7 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
 											<SelectValue placeholder="Select effort" />
@@ -275,7 +275,7 @@ export const SettingsDialog = ({
 											</SelectItem>
 										</SelectContent>
 									</Select>
-									<span className="flex items-start gap-1 text-[10px] leading-normal text-amber-500/70">
+									<span className="flex items-start gap-1 text-[11px] leading-normal text-amber-500/70">
 										<AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
 										<span>Thinking Mode supports dynamic concurrent active DOM tool calling under V4 API specifications.</span>
 									</span>
@@ -287,29 +287,29 @@ export const SettingsDialog = ({
 						<div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
 							<div className="flex items-center justify-between">
 								<div className="flex flex-col gap-0.5">
-									<label className="text-[10px] font-bold text-zinc-400">Detailed Tool Calls</label>
-									<span className="text-[10px] text-zinc-500">Show step-by-step action details</span>
+									<label className="text-[11px] font-bold text-zinc-400">Detailed Tool Calls</label>
+									<span className="text-[11px] text-zinc-500">Show step-by-step action details</span>
 								</div>
 								<Switch checked={showToolCallsDetail} onCheckedChange={(checked) => setShowToolCallsDetail(checked)} />
 							</div>
 						</div>
 
 						<div className="flex flex-col gap-1.5">
-							<label className="text-[10px] font-bold text-zinc-400">Agent System Instructions</label>
+							<label className="text-[11px] font-bold text-zinc-400">Agent System Instructions</label>
 							<Textarea rows={4} value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} className="h-[15vh] resize-none border border-zinc-800 bg-zinc-950/40 font-sans text-xs leading-relaxed text-zinc-300 focus-visible:ring-blue-600/35" />
 						</div>
 
 						<div className="flex gap-2">
 							<div className="flex w-[30%] flex-col gap-1.5">
-								<label className="text-[10px] font-bold text-zinc-400">Temp</label>
+								<label className="text-[11px] font-bold text-zinc-400">Temp</label>
 								<Input type="number" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
 							</div>
 							<div className="flex w-[35%] flex-col gap-1.5">
-								<label className="text-[10px] font-bold text-zinc-400">Max Tokens</label>
+								<label className="text-[11px] font-bold text-zinc-400">Max Tokens</label>
 								<Input type="number" min="1" max="8192" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
 							</div>
 							<div className="flex w-[35%] flex-col gap-1.5">
-								<label className="text-[10px] font-bold text-zinc-400">Max Steps</label>
+								<label className="text-[11px] font-bold text-zinc-400">Max Steps</label>
 								<Input type="number" min="1" max="100" value={maxIterations} onChange={(e) => setMaxIterations(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
 							</div>
 						</div>
@@ -322,17 +322,17 @@ export const SettingsDialog = ({
 					</>
 				) : settingsTab === "tools" ? (
 					<div className="flex flex-col gap-3 p-1">
-						<div className="text-[10px] text-zinc-400 leading-relaxed mb-1 border-b border-zinc-850 pb-2 text-left">
+						<div className="text-[11px] text-zinc-400 leading-relaxed mb-1 border-b border-zinc-850 pb-2 text-left">
 							Toggle individual capabilities to control the agent's action boundaries and privacy permissions. Disabled tools will be completely hidden from the AI models.
 						</div>
 						{AVAILABLE_TOOLS.map((tool) => (
 							<div key={tool.key} className="flex items-start justify-between gap-3 p-2.5 border border-zinc-900 bg-zinc-950/40 rounded-xl transition-colors hover:border-zinc-800/80">
 								<div className="flex flex-col gap-1 flex-1 text-left">
 									<div className="flex items-center gap-1.5">
-										<span className="text-[10px] font-bold text-zinc-200">{tool.name}</span>
-										<span className="text-[7.5px] font-mono text-zinc-550 bg-zinc-950 border border-zinc-900 px-1 py-0.5 rounded select-all leading-none">{tool.key}</span>
+										<span className="text-[11px] font-bold text-zinc-200">{tool.name}</span>
+										<span className="text-[11px] font-mono text-zinc-550 bg-zinc-950 border border-zinc-900 px-1 py-0.5 rounded select-all leading-none">{tool.key}</span>
 									</div>
-									<span className="text-[9px] text-zinc-400 leading-normal">{tool.desc}</span>
+									<span className="text-[11px] text-zinc-400 leading-normal">{tool.desc}</span>
 								</div>
 								<Switch
 									checked={enabledTools[tool.key] !== false}
@@ -355,7 +355,7 @@ export const SettingsDialog = ({
 								onClick={() => {
 									chrome.tabs.create({ url: chrome.runtime.getURL("sessions.html") });
 								}}
-								className="w-full justify-center gap-1.5 border-zinc-800 bg-zinc-950/40 text-[10px] text-blue-400 hover:bg-zinc-900/60 hover:text-blue-300 rounded-lg h-7 font-bold uppercase tracking-wider mb-2 cursor-pointer transition-all"
+								className="w-full justify-center gap-1.5 border-zinc-800 bg-zinc-950/40 text-[11px] text-blue-400 hover:bg-zinc-900/60 hover:text-blue-300 rounded-lg h-7 font-bold uppercase tracking-wider mb-2 cursor-pointer transition-all"
 							>
 								<Compass className="h-3.5 w-3.5" />
 								<span>More Info</span>
@@ -364,8 +364,8 @@ export const SettingsDialog = ({
 						{Object.values(chatMetadata).length === 0 ? (
 							<div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
 								<History className="text-zinc-650 h-8 w-8 animate-pulse" />
-								<p className="text-[10px] font-medium text-zinc-500">No saved sessions yet.</p>
-								<p className="text-zinc-650 max-w-[180px] text-center text-[9px]">Start a conversation to automatically save history logs.</p>
+								<p className="text-[11px] font-medium text-zinc-500">No saved sessions yet.</p>
+								<p className="text-zinc-650 max-w-[180px] text-center text-[11px]">Start a conversation to automatically save history logs.</p>
 							</div>
 						) : (
 							Object.values(chatMetadata)
@@ -391,13 +391,13 @@ export const SettingsDialog = ({
 															}}
 															onBlur={() => handleSaveTitle(session.key)}
 															autoFocus
-															className="h-6 rounded border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-[10px] text-zinc-200 focus-visible:ring-1 focus-visible:ring-blue-500"
+															className="h-6 rounded border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-[11px] text-zinc-200 focus-visible:ring-1 focus-visible:ring-blue-500"
 														/>
 													</div>
 												) : (
 													<div className="flex flex-1 items-center gap-2 truncate">
 														<span className="shrink-0"><History className="h-3.5 w-3.5 text-blue-500 shrink-0" /></span>
-														<h3 className={`truncate text-[10px] font-bold ${isActive ? "text-blue-400" : "text-zinc-200 group-hover:text-white"}`} title={session.title}>
+														<h3 className={`truncate text-[11px] font-bold ${isActive ? "text-blue-400" : "text-zinc-200 group-hover:text-white"}`} title={session.title}>
 															{session.title}
 														</h3>
 														<Tooltip>
@@ -428,15 +428,15 @@ export const SettingsDialog = ({
 
 											{/* Professional Webpage / Domain Link Display */}
 											{(session.url && session.url !== "none" && session.url !== "") || (session.domain && session.domain !== "none" && session.domain !== "") ? (
-												<div className="flex flex-col gap-1 font-mono text-[9px]">
+												<div className="flex flex-col gap-1 font-mono text-[11px]">
 													{session.domain && session.domain !== "none" && session.domain !== "" && (
-														<div className="flex max-w-full items-center gap-1.5 rounded-md border border-zinc-900 bg-zinc-950/70 px-2 py-1 text-[9px] text-zinc-500">
+														<div className="flex max-w-full items-center gap-1.5 rounded-md border border-zinc-900 bg-zinc-950/70 px-2 py-1 text-[11px] text-zinc-500">
 															<Building className="h-3.5 w-3.5 shrink-0 text-amber-500/70" />
 															<span className="flex-1 truncate text-zinc-400">{session.domain}</span>
 														</div>
 													)}
 													{session.url && session.url !== "none" && session.url !== "" && (
-														<div className="flex max-w-full items-center gap-1.5 overflow-hidden rounded-md border border-zinc-900 bg-zinc-950/70 px-2 py-1 text-[9px] text-zinc-500 transition-colors hover:text-zinc-300">
+														<div className="flex max-w-full items-center gap-1.5 overflow-hidden rounded-md border border-zinc-900 bg-zinc-950/70 px-2 py-1 text-[11px] text-zinc-500 transition-colors hover:text-zinc-300">
 															<Compass className="h-3.5 w-3.5 shrink-0 text-blue-500/70" />
 															<span className="flex-1 truncate text-zinc-400" title={session.url}>
 																{session.url}
@@ -446,8 +446,8 @@ export const SettingsDialog = ({
 												</div>
 											) : null}
 
-											<div className="mt-1 flex items-center justify-between text-[9px] text-zinc-600">
-												<span className="font-mono text-[8px] uppercase tracking-wider text-zinc-500 font-bold select-none">CONVERSATION SESSION</span>
+											<div className="mt-1 flex items-center justify-between text-[11px] text-zinc-600">
+												<span className="font-mono text-[11px] uppercase tracking-wider text-zinc-500 font-bold select-none">CONVERSATION SESSION</span>
 												<span className="font-sans font-medium">{dateStr}</span>
 											</div>
 
