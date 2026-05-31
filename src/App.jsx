@@ -161,6 +161,7 @@ export default function App() {
 	const activeTabIdRef = useRef(activeTabId);
 	const activeUrlRef = useRef(activeUrl);
 	const activeTabTitleRef = useRef(activeTabTitle);
+	const activeDomainRef = useRef(activeDomain);
 	const apiKeyRef = useRef(apiKey);
 	const chatsRef = useRef(chats);
 	const activeSessionKeyRef = useRef(activeSessionKey);
@@ -172,12 +173,13 @@ export default function App() {
 		activeTabIdRef.current = activeTabId;
 		activeUrlRef.current = activeUrl;
 		activeTabTitleRef.current = activeTabTitle;
+		activeDomainRef.current = activeDomain;
 		apiKeyRef.current = apiKey;
 		chatsRef.current = chats;
 		activeSessionKeyRef.current = activeSessionKey;
 		lockedChatKeyRef.current = lockedChatKey;
 		isGeneratingRef.current = isGenerating;
-	}, [activeTabId, activeUrl, activeTabTitle, apiKey, chats, activeSessionKey, lockedChatKey, isGenerating]);
+	}, [activeTabId, activeUrl, activeTabTitle, activeDomain, apiKey, chats, activeSessionKey, lockedChatKey, isGenerating]);
 
 	// Test API Key validity
 	async function handleTestApiKey() {
@@ -540,6 +542,19 @@ export default function App() {
 		return chats[key] || [];
 	};
 
+	// Stale-closure safe getters using refs directly (for use in async callbacks/handlers)
+	const getLatestChatKey = () => {
+		if (lockedChatKeyRef.current) {
+			return lockedChatKeyRef.current;
+		}
+		return activeSessionKeyRef.current;
+	};
+
+	const getLatestMessages = () => {
+		const key = getLatestChatKey();
+		return chatsRef.current[key] || [];
+	};
+
 
 	// Save changes to storage
 	const saveConfiguration = () => {
@@ -592,7 +607,7 @@ export default function App() {
 
 	// Save new messages to log in local storage
 	function saveMessageLog(newMessages) {
-		const key = getChatKey(currentScopeRef.current);
+		const key = getLatestChatKey();
 
 		// Determine a title for the session based on first user message, or activeTabTitle, or key
 		let firstUserMsg = newMessages.find((m) => m.role === "user")?.content || "";
@@ -603,8 +618,8 @@ export default function App() {
 		const scope = currentScopeRef.current;
 		let fallbackTitle;
 		if (scope === "global") fallbackTitle = "Global Chat";
-		else if (scope === "domain") fallbackTitle = `Domain: ${activeDomain}`;
-		else fallbackTitle = activeTabTitle || activeUrl || "Website Chat";
+		else if (scope === "domain") fallbackTitle = `Domain: ${activeDomainRef.current}`;
+		else fallbackTitle = activeTabTitleRef.current || activeUrlRef.current || "Website Chat";
 
 		const title = firstUserMsg || fallbackTitle;
 
@@ -626,8 +641,8 @@ export default function App() {
 				[key]: {
 					key,
 					scope,
-					domain: activeDomain,
-					url: activeUrl,
+					domain: activeDomainRef.current,
+					url: activeUrlRef.current,
 					title: finalTitle,
 					timestamp: Date.now(),
 					hasAiTitle: existing?.hasAiTitle || false,
@@ -637,7 +652,7 @@ export default function App() {
 
 			// Auto generate AI title after 2 user messages (deepseek-v4-flash only)
 			const userMsgs = newMessages.filter((m) => m.role === "user");
-			if (userMsgs.length === 2 && !updatedMeta[key]?.hasAiTitle && apiKey) {
+			if (userMsgs.length === 2 && !updatedMeta[key]?.hasAiTitle && apiKeyRef.current) {
 				generateAiTitle(newMessages, key);
 			}
 
@@ -928,7 +943,7 @@ END OF DEBUG COMPILATION
 
 	// Appends a new message block locally
 	function addLocalMessage(role, content, additional = {}) {
-		const currentMsgs = getMessages();
+		const currentMsgs = getLatestMessages();
 		const newMsg = {
 			role,
 			content,
