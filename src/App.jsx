@@ -2820,11 +2820,11 @@ END OF DEBUG COMPILATION
 									<AlertTriangle className="h-5 w-5 text-amber-500" />
 								</div>
 								<CardTitle className="text-xs font-bold tracking-tight text-zinc-200">URL Change Detected</CardTitle>
-								<CardDescription className="text-zinc-450 text-[10px] leading-normal">We noticed you navigated to a new webpage or switched tabs.</CardDescription>
+								<CardDescription className="text-zinc-450 text-[11px] leading-normal">We noticed you navigated to a new webpage or switched tabs.</CardDescription>
 							</CardHeader>
 
 							<CardContent className="p-0 text-center">
-								<p className="border-zinc-850 rounded-lg border bg-zinc-900/50 p-2.5 text-[10px] leading-normal text-zinc-300">Do you wish to continue in the same chat or start a fresh global session?</p>
+								<p className="border-zinc-850 rounded-lg border bg-zinc-900/50 p-2.5 text-[11px] leading-normal text-zinc-300">Do you wish to continue in the same chat or start a fresh global session?</p>
 							</CardContent>
 
 							<CardFooter className="flex flex-col gap-2 p-0">
@@ -2847,7 +2847,7 @@ END OF DEBUG COMPILATION
 								>
 									Continue in Current Chat
 								</Button>
-								<div className="text-zinc-550 mt-1 text-center text-[9px] font-medium italic leading-snug">Note: Starting a new chat is highly recommended to keep context clean and get more accurate answers!</div>
+								<div className="text-zinc-550 mt-1 text-center text-[11px] font-medium italic leading-snug">Note: Starting a new chat is highly recommended to keep context clean and get more accurate answers!</div>
 							</CardFooter>
 						</Card>
 					</div>
@@ -2860,12 +2860,12 @@ END OF DEBUG COMPILATION
 							<CardHeader className="flex flex-col items-center gap-1.5 p-0 text-center">
 								<div className="relative mb-1 flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10">
 									<ShieldAlert className="h-5 w-5 text-blue-400" />
-									<span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 font-mono text-[9px] font-bold text-zinc-950 animate-pulse">
+									<span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 font-mono text-[11px] font-bold text-zinc-950 animate-pulse">
 										{devicePrivacyTimer}
 									</span>
 								</div>
 								<CardTitle className="text-xs font-bold tracking-tight text-zinc-200">Device Privacy Request</CardTitle>
-								<CardDescription className="text-zinc-400 text-[10px] leading-normal">
+								<CardDescription className="text-zinc-400 text-[11px] leading-normal">
 									The agent requested details about this device. Choose what you want to share.
 								</CardDescription>
 							</CardHeader>
@@ -2880,8 +2880,8 @@ END OF DEBUG COMPILATION
 											className="mt-0.5 h-3.5 w-3.5 cursor-pointer rounded border-zinc-700 bg-zinc-950 text-blue-600 accent-blue-500 focus:ring-0 focus:ring-offset-0"
 										/>
 										<div className="flex flex-col">
-											<span className="text-[10px] font-bold text-zinc-200">OS & Platform</span>
-											<span className="text-[9px] leading-snug text-zinc-400">OS Name (e.g. Linux), CPU Arch (e.g. x64)</span>
+											<span className="text-[11px] font-bold text-zinc-200">OS & Platform</span>
+											<span className="text-[11px] leading-snug text-zinc-400">OS Name (e.g. Linux), CPU Arch (e.g. x64)</span>
 										</div>
 									</label>
 
@@ -2893,8 +2893,8 @@ END OF DEBUG COMPILATION
 											className="mt-0.5 h-3.5 w-3.5 cursor-pointer rounded border-zinc-700 bg-zinc-950 text-blue-600 accent-blue-500 focus:ring-0 focus:ring-offset-0"
 										/>
 										<div className="flex flex-col">
-											<span className="text-[10px] font-bold text-zinc-200">Hardware Info</span>
-											<span className="text-[9px] leading-snug text-zinc-400">Logical CPU Cores, System Memory, Resolution</span>
+											<span className="text-[11px] font-bold text-zinc-200">Hardware Info</span>
+											<span className="text-[11px] leading-snug text-zinc-400">Logical CPU Cores, System Memory, Resolution</span>
 										</div>
 									</label>
 
@@ -2906,8 +2906,8 @@ END OF DEBUG COMPILATION
 											className="mt-0.5 h-3.5 w-3.5 cursor-pointer rounded border-zinc-700 bg-zinc-950 text-blue-600 accent-blue-500 focus:ring-0 focus:ring-offset-0"
 										/>
 										<div className="flex flex-col">
-											<span className="text-[10px] font-bold text-zinc-200">Network & Timezone</span>
-											<span className="text-[9px] leading-snug text-zinc-400">Connection Speed, Timezone, Language</span>
+											<span className="text-[11px] font-bold text-zinc-200">Network & Timezone</span>
+											<span className="text-[11px] leading-snug text-zinc-400">Connection Speed, Timezone, Language</span>
 										</div>
 									</label>
 								</div>
@@ -2927,13 +2927,14 @@ END OF DEBUG COMPILATION
 								>
 									Block / Send Nothing
 								</Button>
-								<div className="text-zinc-500 text-[8px] font-medium text-center leading-normal">
+								<div className="text-zinc-500 text-[11px] font-medium text-center leading-normal">
 									Timeout: Automatically shares OS & Hardware in {devicePrivacyTimer}s
 								</div>
 							</CardFooter>
 						</Card>
 					</div>
 				)}
+
 
 				{/* 6. Settings Sidebar Drawer */}
 				<SettingsDialog
