@@ -671,32 +671,6 @@ export default function App() {
 		lastLoggedTabIdRef.current = activeTabId;
 		lastVerifiedUrlRef.current = activeUrl;
 		approvedChatUrlRef.current = activeUrl;
-
-		setChats((prevChats) => {
-			const updatedChats = {
-				...prevChats,
-				[newKey]: [],
-			};
-			chrome.storage.local.set({ chats: updatedChats });
-			return updatedChats;
-		});
-
-		setChatMetadata((prevMeta) => {
-			const updatedMeta = {
-				...prevMeta,
-				[newKey]: {
-					key: newKey,
-					scope: "global",
-					domain: activeDomain,
-					url: activeUrl,
-					title: "New Global Chat",
-					timestamp: Date.now(),
-					hasAiTitle: false,
-				},
-			};
-			chrome.storage.local.set({ chatMetadata: updatedMeta });
-			return updatedMeta;
-		});
 	};
 
 	// Theme toggle action
