@@ -1916,17 +1916,11 @@ END OF DEBUG COMPILATION
 
 					// Comment lines
 					if (line.trim().startsWith("#")) {
-						const key = getLetterID(lineReplacements.length);
-						const placeholder = `%%BASHREP${key}%%`;
-						lineReplacements.push(`<span class="text-zinc-500 font-mono italic">${line}</span>`);
-						return placeholder;
+						return `<span class="text-zinc-500 font-mono italic">${line}</span>`;
 					}
 					// Output lines (like "Output: ...")
 					if (line.startsWith("Output:")) {
-						const key = getLetterID(lineReplacements.length);
-						const placeholder = `%%BASHREP${key}%%`;
-						lineReplacements.push(`<span class="text-blue-600 dark:text-blue-400 font-bold font-mono">${line}</span>`);
-						return placeholder;
+						return `<span class="text-blue-600 dark:text-blue-400 font-bold font-mono">${line}</span>`;
 					}
 
 					// Highlight URLs

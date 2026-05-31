@@ -65,9 +65,7 @@ function renderMarkdown(text) {
 				const lineReplacements = [];
 				let highlighted = line;
 				if (line.trim().startsWith("#")) {
-					const key = getLetterID(lineReplacements.length);
-					lineReplacements.push(`<span class="text-zinc-500 font-mono italic">${line}</span>`);
-					return `%%BASHREP${key}%%`;
+					return `<span class="text-zinc-500 font-mono italic">${line}</span>`;
 				}
 				highlighted = highlighted.replace(/(https?:\/\/[^\s]+)/g, (url) => {
 					const key = getLetterID(lineReplacements.length);
