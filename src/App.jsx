@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, Settings, Trash2, ShieldAlert, Eye, EyeOff, AlertTriangle, X, Loader2, Check, Copy, History, Globe, Building, FileText, Search, Compass, Plus, Pencil, Sun, Moon, Terminal } from "lucide-react";
+import { Send, Settings, Trash2, ShieldAlert, Eye, EyeOff, AlertTriangle, X, Loader2, Check, Copy, History, Globe, Building, FileText, Search, Compass, Plus, Pencil, Sun, Moon, Terminal, Square, MessageSquarePlus } from "lucide-react";
 
 // Helper to generate unique session keys (impure function declared outside react context)
 function generateSessionKey() {
@@ -83,7 +83,7 @@ export default function App() {
 	const [streamingResponse, setStreamingResponse] = useState("");
 
 	// Agent control states
-	const [stopRequested, setStopRequested] = useState(false);
+	const [, setStopRequested] = useState(false);
 	const stopRequestedRef = useRef(false);
 	const [queuedComment, setQueuedComment] = useState("");
 	const queuedCommentRef = useRef("");
@@ -505,23 +505,6 @@ export default function App() {
 		return chats[key] || [];
 	};
 
-	// Sum up preceding tool calls for a collapsed turn
-	const getPrecedingToolCallsCount = (msgIndex) => {
-		const msgs = getMessages();
-		let count = 0;
-		// Go backward from msgIndex until we hit a user message
-		for (let i = msgIndex; i >= 0; i--) {
-			const m = msgs[i];
-			if (!m) continue;
-			if (m.role === "user") {
-				break;
-			}
-			if (m.role === "assistant" && m.toolCalls) {
-				count += m.toolCalls.length;
-			}
-		}
-		return count;
-	};
 
 	// Save changes to storage
 	const saveConfiguration = () => {
@@ -2226,7 +2209,7 @@ END OF DEBUG COMPILATION
 
 	return (
 		<TooltipProvider delayDuration={10}>
-			<div className={`relative flex h-screen w-screen select-none flex-col overflow-hidden bg-background font-sans text-foreground ${theme}`}>
+			<div className={`relative flex h-screen w-screen flex-col overflow-hidden bg-background font-sans text-foreground ${theme}`}>
 				{/* 1. Header Bar */}
 				<header className="z-30 flex items-center justify-between border-b border-border bg-card p-2.5 shadow-sm">
 					<div className="flex min-w-0 max-w-[60%] items-center gap-2">
@@ -2392,212 +2375,262 @@ END OF DEBUG COMPILATION
 						</div>
 					) : (
 						<div className="flex flex-col gap-3">
-							{getMessages().map((msg, index) => {
-								if (msg.role === "system") {
-									// Suppress verbose agent execution logs
-									if (msg.content.startsWith("Agent action:") || msg.content.startsWith("Completed tool:") || msg.content.startsWith("Blocked:")) {
-										return null;
-									}
-									return (
-										<div key={index} className="animate-fade-in flex justify-center">
-											<div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 font-mono text-[10px] text-zinc-500">
-												<div className="h-1 w-1 animate-pulse rounded-full bg-blue-500" />
-												<span>{msg.content}</span>
-											</div>
-										</div>
-									);
-								}
+							{(() => {
+								const allMsgs = getMessages();
+								const rendered = [];
 
-								if (msg.role === "tool") {
-									// Suppress rendering tool results as independent elements!
-									return null;
-								}
-
-								if (msg.role === "assistant" && !showToolCallsDetail && msg.toolCalls && msg.toolCalls.length > 0 && (!msg.content || msg.content.trim() === "")) {
-									// Suppress intermediate agent execution steps when detailed view is disabled
-									return null;
-								}
-
-								if (msg.role === "escalation_request") {
-									return (
-										<div key={index} className="animate-fade-in flex w-full justify-center">
-											<Card className="w-full max-w-[95%] gap-2 border-amber-500/20 bg-amber-500/5 shadow-sm">
-												<CardHeader className="gap-1 pb-1">
-													<CardTitle className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-500">
-														<ShieldAlert className="h-4 w-4 text-amber-500/80" />
-														<span>Scope Elevation Requested</span>
-													</CardTitle>
-													<CardDescription className="mt-1 text-xs leading-relaxed text-zinc-300">DeepSeek requests browser access.</CardDescription>
-												</CardHeader>
-												<CardContent className="pb-2 text-xs text-zinc-300">
-													<p className="border-l border-amber-500/25 pl-1.5 text-[10px] italic text-zinc-400">Reason: "{msg.reason}"</p>
-												</CardContent>
-												<CardFooter className="border-t-0 bg-transparent pb-3 pt-0">
-													<span className="text-zinc-650 text-[10px] font-bold uppercase tracking-wider">RESOLVED</span>
-												</CardFooter>
-											</Card>
-										</div>
-									);
-								}
-
-								return (
-									<div key={index} className={`animate-fade-in flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-										<div className="flex max-w-[88%] flex-col gap-0.5">
-											<div className={`rounded-xl p-2.5 text-xs leading-relaxed ${msg.role === "user" ? "rounded-tr-none border border-zinc-800 bg-zinc-900 text-zinc-100" : "border-zinc-850 rounded-tl-none border bg-zinc-950/60 text-zinc-300 shadow-sm"}`}>
-												{msg.reasoning && showToolCallsDetail && (
-													<div className="mb-2 max-w-full rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
-														<div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1 select-none">Thinking Process</div>
-														<div className="whitespace-pre-wrap font-mono text-[10px] leading-normal text-amber-500/80">{msg.reasoning}</div>
+								if (!showToolCallsDetail) {
+									let i = 0;
+									while (i < allMsgs.length) {
+										const msg = allMsgs[i];
+										if (msg.role === "user") {
+											rendered.push(
+												<div key={`user-${i}`} className="animate-fade-in flex w-full justify-end">
+													<div className="flex max-w-[88%] flex-col gap-0.5">
+														<div className="rounded-xl rounded-tr-none border border-zinc-800 bg-zinc-900 p-2.5 text-xs leading-relaxed text-zinc-100">
+															<div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+														</div>
 													</div>
-												)}
-
-												{!showToolCallsDetail && (() => {
-													const totalCount = getPrecedingToolCallsCount(index);
-													if (totalCount > 0) {
-														return (
-															<Tooltip>
-																<TooltipTrigger asChild>
-																	<div className="flex items-center my-3 text-[10px] text-zinc-450 dark:text-zinc-500 select-none w-full cursor-help hover:opacity-85 transition-opacity">
-																		<div className="flex-1 h-[1px] bg-gradient-to-r from-transparent to-zinc-300 dark:to-zinc-800/80" />
-																		<span className="px-3 font-mono font-bold tracking-wide text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 whitespace-nowrap">
-																			--- {totalCount} tool {totalCount === 1 ? "call" : "calls"} ---
-																		</span>
-																		<div className="flex-1 h-[1px] bg-gradient-to-l from-transparent to-zinc-300 dark:to-zinc-800/80" />
-																	</div>
-																</TooltipTrigger>
-																<TooltipContent className="custom-tooltip flex max-w-[260px] flex-col gap-1.5 rounded-lg border border-zinc-850 bg-[#0e1118] p-2.5 text-[11px] text-zinc-300 shadow-2xl leading-normal">
-																	<span className="font-semibold text-zinc-100">Tool Calls Hidden</span>
-																	<span>To view details of all active tools, enable detailed tool logs in the top header by clicking the</span>
-																	<span className="flex items-center gap-1 w-max rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-blue-400 tracking-wide uppercase select-none">
-																		<Terminal className="h-3 w-3" /> Terminal
+												</div>
+											);
+											i++;
+											continue;
+										}
+										if (msg.role === "system") {
+											if (msg.content.startsWith("Agent action:") || msg.content.startsWith("Completed tool:") || msg.content.startsWith("Blocked:")) {
+												i++;
+												continue;
+											}
+											rendered.push(
+												<div key={`sys-${i}`} className="animate-fade-in flex justify-center">
+													<div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 font-mono text-[10px] text-zinc-500">
+														<div className="h-1 w-1 animate-pulse rounded-full bg-blue-500" />
+														<span>{msg.content}</span>
+													</div>
+												</div>
+											);
+											i++;
+											continue;
+										}
+										if (msg.role === "tool") {
+											i++;
+											continue;
+										}
+										if (msg.role === "escalation_request") {
+											rendered.push(
+												<div key={`esc-${i}`} className="animate-fade-in flex w-full justify-center">
+													<Card className="w-full max-w-[95%] gap-2 border-amber-500/20 bg-amber-500/5 shadow-sm">
+														<CardHeader className="gap-1 pb-1">
+															<CardTitle className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-500">
+																<ShieldAlert className="h-4 w-4 text-amber-500/80" />
+																<span>Scope Elevation Requested</span>
+															</CardTitle>
+															<CardDescription className="mt-1 text-xs leading-relaxed text-zinc-300">DeepSeek requests browser access.</CardDescription>
+														</CardHeader>
+														<CardContent className="pb-2 text-xs text-zinc-300">
+															<p className="border-l border-amber-500/25 pl-1.5 text-[10px] italic text-zinc-400">Reason: &quot;{msg.reason}&quot;</p>
+														</CardContent>
+														<CardFooter className="border-t-0 bg-transparent pb-3 pt-0">
+															<span className="text-zinc-650 text-[10px] font-bold uppercase tracking-wider">RESOLVED</span>
+														</CardFooter>
+													</Card>
+												</div>
+											);
+											i++;
+											continue;
+										}
+										if (msg.role === "assistant") {
+											let toolCallCount = 0;
+											let j = i;
+											let lastAssistantWithContent = null;
+											while (j < allMsgs.length && allMsgs[j].role !== "user") {
+												const m = allMsgs[j];
+												if (m.role === "assistant") {
+													if (m.toolCalls && m.toolCalls.length > 0) toolCallCount += m.toolCalls.length;
+													if (m.content && m.content.trim() !== "") lastAssistantWithContent = m;
+												}
+												j++;
+											}
+											if (toolCallCount > 0) {
+												rendered.push(
+													<div key={`tc-sep-${i}`} className="animate-fade-in">
+														<Tooltip>
+															<TooltipTrigger asChild>
+																<div className="flex items-center my-3 text-[10px] text-zinc-450 dark:text-zinc-500 select-none w-full cursor-help hover:opacity-85 transition-opacity">
+																	<div className="flex-1 h-[1px] bg-gradient-to-r from-transparent to-zinc-300 dark:to-zinc-800/80" />
+																	<span className="px-3 font-mono font-bold tracking-wide text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 whitespace-nowrap">
+																		--- {toolCallCount} tool {toolCallCount === 1 ? "call" : "calls"} ---
 																	</span>
-																	<span>icon.</span>
-																</TooltipContent>
-															</Tooltip>
-														);
-													}
-													return null;
-												})()}
-
-												{msg.content && (
-													<div
-														className="markdown-body"
-														dangerouslySetInnerHTML={{
-															__html: renderMarkdown(msg.content),
-														}}
-													/>
-												)}
-
-												{msg.toolCalls && msg.toolCalls.length > 0 && (
-													showToolCallsDetail ? (
-														<div className="mt-2 flex w-full flex-col gap-2 border-t border-zinc-800/60 pt-2">
-															<span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400">Actions Executed</span>
-															{msg.toolCalls.map((tc) => {
-																const toolName = tc.function.name;
-																const toolArgs = tc.function.arguments || "";
-
-																// Find corresponding tool result message in the chat
-																const priorMsgs = getMessages();
-																const toolResultMsg = priorMsgs.find((m) => m.role === "tool" && m.toolCallId === tc.id);
-
-																let success = true;
-																let errorMsg = "";
-																let resultStr = "";
-																let isPending = !toolResultMsg;
-
-																if (toolResultMsg) {
-																	resultStr = toolResultMsg.content;
+																	<div className="flex-1 h-[1px] bg-gradient-to-l from-transparent to-zinc-300 dark:to-zinc-800/80" />
+																</div>
+															</TooltipTrigger>
+															<TooltipContent className="custom-tooltip flex max-w-[260px] flex-col gap-1.5 rounded-lg border border-zinc-850 bg-[#0e1118] p-2.5 text-[11px] text-zinc-300 shadow-2xl leading-normal">
+																<span className="font-semibold text-zinc-100">Tool Calls Hidden</span>
+																<span>To view details of all active tools, enable detailed tool logs in the top header by clicking the</span>
+																<span className="flex items-center gap-1 w-max rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-blue-400 tracking-wide uppercase select-none">
+																	<Terminal className="h-3 w-3" /> Terminal
+																</span>
+																<span>icon.</span>
+															</TooltipContent>
+														</Tooltip>
+													</div>
+												);
+											}
+											if (lastAssistantWithContent) {
+												rendered.push(
+													<div key={`asst-final-${i}`} className="animate-fade-in flex w-full justify-start">
+														<div className="flex max-w-[88%] flex-col gap-0.5">
+															<div className="border-zinc-850 rounded-xl rounded-tl-none border bg-zinc-950/60 p-2.5 text-xs leading-relaxed text-zinc-300 shadow-sm">
+																<div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(lastAssistantWithContent.content) }} />
+															</div>
+														</div>
+													</div>
+												);
+											}
+											i = j;
+											continue;
+										}
+										i++;
+									}
+								} else {
+									allMsgs.forEach((msg, index) => {
+										if (msg.role === "system") {
+											if (msg.content.startsWith("Agent action:") || msg.content.startsWith("Completed tool:") || msg.content.startsWith("Blocked:")) return;
+											rendered.push(
+												<div key={`sys-${index}`} className="animate-fade-in flex justify-center">
+													<div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 font-mono text-[10px] text-zinc-500">
+														<div className="h-1 w-1 animate-pulse rounded-full bg-blue-500" />
+														<span>{msg.content}</span>
+													</div>
+												</div>
+											);
+											return;
+										}
+										if (msg.role === "tool") return;
+										if (msg.role === "escalation_request") {
+											rendered.push(
+												<div key={`esc-${index}`} className="animate-fade-in flex w-full justify-center">
+													<Card className="w-full max-w-[95%] gap-2 border-amber-500/20 bg-amber-500/5 shadow-sm">
+														<CardHeader className="gap-1 pb-1">
+															<CardTitle className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-500">
+																<ShieldAlert className="h-4 w-4 text-amber-500/80" />
+																<span>Scope Elevation Requested</span>
+															</CardTitle>
+															<CardDescription className="mt-1 text-xs leading-relaxed text-zinc-300">DeepSeek requests browser access.</CardDescription>
+														</CardHeader>
+														<CardContent className="pb-2 text-xs text-zinc-300">
+															<p className="border-l border-amber-500/25 pl-1.5 text-[10px] italic text-zinc-400">Reason: &quot;{msg.reason}&quot;</p>
+														</CardContent>
+														<CardFooter className="border-t-0 bg-transparent pb-3 pt-0">
+															<span className="text-zinc-650 text-[10px] font-bold uppercase tracking-wider">RESOLVED</span>
+														</CardFooter>
+													</Card>
+												</div>
+											);
+											return;
+										}
+										rendered.push(
+											<div key={`msg-${index}`} className={`animate-fade-in flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+												<div className="flex max-w-[88%] flex-col gap-0.5">
+													<div className={`rounded-xl p-2.5 text-xs leading-relaxed ${msg.role === "user" ? "rounded-tr-none border border-zinc-800 bg-zinc-900 text-zinc-100" : "border-zinc-850 rounded-tl-none border bg-zinc-950/60 text-zinc-300 shadow-sm"}`}>
+														{msg.reasoning && (
+															<div className="mb-2 max-w-full rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
+																<div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1 select-none">Thinking Process</div>
+																<div className="whitespace-pre-wrap font-mono text-[10px] leading-normal text-amber-500/80">{msg.reasoning}</div>
+															</div>
+														)}
+														{msg.content && <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
+														{msg.toolCalls && msg.toolCalls.length > 0 && (
+															<div className="mt-2 flex w-full flex-col gap-2 border-t border-zinc-800/60 pt-2">
+																<span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400">Actions Executed</span>
+																{msg.toolCalls.map((tc) => {
+																	const toolName = tc.function.name;
+																	const toolArgs = tc.function.arguments || "";
+																	const toolResultMsg = allMsgs.find((m) => m.role === "tool" && m.toolCallId === tc.id);
+																	let success = true, errorMsg = "", resultStr = toolResultMsg ? toolResultMsg.content : "", isPending = !toolResultMsg;
+																	if (toolResultMsg) {
+																		try {
+																			const parsed = JSON.parse(toolResultMsg.content);
+																			if (parsed.success === false) { success = false; errorMsg = parsed.error || parsed.message || "Execution failed"; }
+																			else if (parsed.error) { success = false; errorMsg = parsed.error; }
+																		} catch { /* non-JSON content */ }
+																	}
+																	let parsedArgs = null, argsSummary = "";
 																	try {
-																		const parsed = JSON.parse(toolResultMsg.content);
-																		if (parsed.success === false) {
-																			success = false;
-																			errorMsg = parsed.error || parsed.message || "Execution failed";
-																		} else if (parsed.error) {
-																			success = false;
-																			errorMsg = parsed.error;
+																		if (toolArgs) {
+																			parsedArgs = JSON.parse(toolArgs);
+																			if (parsedArgs.selector) argsSummary = `selector: "${parsedArgs.selector}"`;
+																			else if (parsedArgs.url) argsSummary = `url: "${parsedArgs.url}"`;
+																			else if (parsedArgs.text) argsSummary = `text: "${parsedArgs.text}"`;
+																			else if (parsedArgs.query) argsSummary = `query: "${parsedArgs.query}"`;
+																			else if (parsedArgs.direction) argsSummary = `${parsedArgs.direction} (${parsedArgs.amount || 300}px)`;
+																			else if (parsedArgs.tabId) argsSummary = `tabId: ${parsedArgs.tabId}`;
 																		}
-																	} catch {
-																		// Ignore
-																	}
-																}
-
-																let parsedArgs = null;
-																let argsSummary = "";
-																try {
-																	if (toolArgs) {
-																		parsedArgs = JSON.parse(toolArgs);
-																		if (parsedArgs.selector) argsSummary = `selector: "${parsedArgs.selector}"`;
-																		else if (parsedArgs.url) argsSummary = `url: "${parsedArgs.url}"`;
-																		else if (parsedArgs.text) argsSummary = `text: "${parsedArgs.text}"`;
-																		else if (parsedArgs.query) argsSummary = `query: "${parsedArgs.query}"`;
-																		else if (parsedArgs.direction) argsSummary = `${parsedArgs.direction} (${parsedArgs.amount || 300}px)`;
-																		else if (parsedArgs.tabId) argsSummary = `tabId: ${parsedArgs.tabId}`;
-																	}
-																} catch {
-																	// Ignore
-																}
-
-																return (
-																	<details key={tc.id} className="border-zinc-850 group overflow-hidden rounded-lg border bg-zinc-950/70 shadow-inner transition-all">
-																		<summary className="flex cursor-pointer select-none items-center justify-between bg-zinc-900/10 p-2 font-mono text-[10px] transition-colors hover:bg-zinc-900/30">
-																			<div className="flex items-center gap-2 truncate pr-2">
-																				{isPending ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500" /> : success ? <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]" /> : <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]" />}
-																				<span className="shrink-0 font-bold text-zinc-300">{toolName}</span>
-																				{argsSummary && <span className="text-zinc-550 max-w-[130px] truncate font-sans">({argsSummary})</span>}
-																			</div>
-																			<div className="flex shrink-0 items-center gap-1.5">
-																				<span className={`rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${isPending ? "bg-blue-500/10 text-blue-400" : success ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{isPending ? "running" : success ? "success" : "failed"}</span>
-																				<span className="text-zinc-650 text-[9px] transition-transform duration-200 group-open:rotate-180">▼</span>
-																			</div>
-																		</summary>
-																		<div className="border-zinc-850 flex flex-col gap-2.5 border-t bg-zinc-950/90 p-2.5">
-																			{parsedArgs && (
-																				<div className="flex flex-col gap-0.5">
-																					<span className="font-sans text-[8px] font-bold uppercase tracking-wider text-zinc-500">Parameters</span>
-																					<pre className="overflow-x-auto rounded border border-zinc-900/60 bg-zinc-950 p-1.5 font-mono text-[9px] text-zinc-400">{JSON.stringify(parsedArgs, null, 2)}</pre>
+																	} catch { /* non-JSON args */ }
+																	return (
+																		<details key={tc.id} className="border-zinc-850 group overflow-hidden rounded-lg border bg-zinc-950/70 shadow-inner transition-all">
+																			<summary className="flex cursor-pointer select-none items-center justify-between bg-zinc-900/10 p-2 font-mono text-[10px] transition-colors hover:bg-zinc-900/30">
+																				<div className="flex items-center gap-2 truncate pr-2">
+																					{isPending ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-blue-500" /> : success ? <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]" /> : <div className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]" />}
+																					<span className="shrink-0 font-bold text-zinc-300">{toolName}</span>
+																					{argsSummary && <span className="text-zinc-550 max-w-[130px] truncate font-sans">({argsSummary})</span>}
 																				</div>
-																			)}
-																			{!isPending && (
-																				<div className="flex flex-col gap-0.5">
-																					<span className="font-sans text-[8px] font-bold uppercase tracking-wider text-zinc-500">Result</span>
-																					{errorMsg && (
-																						<div className="mb-1 flex items-start gap-1 rounded border border-rose-900/30 bg-rose-950/20 px-2 py-1 font-sans text-[9px] font-medium text-rose-400">
-																							<AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-rose-500" />
-																							<span>Error: {errorMsg}</span>
-																						</div>
-																					)}
-																					<pre className="max-h-28 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-all rounded border border-zinc-900/60 bg-zinc-950 p-1.5 font-mono text-[9px] leading-normal text-zinc-300">
-																						{(() => {
-																							try {
-																								const parsed = JSON.parse(resultStr);
-																								return JSON.stringify(parsed, null, 2);
-																							} catch {
-																								return resultStr;
-																							}
-																						})()}
-																					</pre>
+																				<div className="flex shrink-0 items-center gap-1.5">
+																					<span className={`rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${isPending ? "bg-blue-500/10 text-blue-400" : success ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>{isPending ? "running" : success ? "success" : "failed"}</span>
+																					<span className="text-zinc-650 text-[9px] transition-transform duration-200 group-open:rotate-180">▼</span>
 																				</div>
-																			)}
-																		</div>
-																	</details>
-																);
-															})}
-														</div>
-													) : (
-														<div className="flex items-center my-3 text-[10px] text-zinc-450 dark:text-zinc-500 select-none w-full">
-															<div className="flex-1 h-[1px] bg-gradient-to-r from-transparent to-zinc-300 dark:to-zinc-800/80" />
-															<span className="px-3 font-mono font-bold tracking-wide text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 whitespace-nowrap">
-																--- {msg.toolCalls.length} tool {msg.toolCalls.length === 1 ? "call" : "calls"} ---
-															</span>
-															<div className="flex-1 h-[1px] bg-gradient-to-l from-transparent to-zinc-300 dark:to-zinc-800/80" />
-														</div>
-													)
-												)}
+																			</summary>
+																			<div className="border-zinc-850 flex flex-col gap-2.5 border-t bg-zinc-950/90 p-2.5">
+																				{parsedArgs && (
+																					<div className="flex flex-col gap-0.5">
+																						<span className="font-sans text-[8px] font-bold uppercase tracking-wider text-zinc-500">Parameters</span>
+																						<pre className="overflow-x-auto rounded border border-zinc-900/60 bg-zinc-950 p-1.5 font-mono text-[9px] text-zinc-400">{JSON.stringify(parsedArgs, null, 2)}</pre>
+																					</div>
+																				)}
+																				{!isPending && (
+																					<div className="flex flex-col gap-0.5">
+																						<span className="font-sans text-[8px] font-bold uppercase tracking-wider text-zinc-500">Result</span>
+																						{errorMsg && (
+																							<div className="mb-1 flex items-start gap-1 rounded border border-rose-900/30 bg-rose-950/20 px-2 py-1 font-sans text-[9px] font-medium text-rose-400">
+																								<AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-rose-500" />
+																								<span>Error: {errorMsg}</span>
+																							</div>
+																						)}
+																						<pre className="max-h-28 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-all rounded border border-zinc-900/60 bg-zinc-950 p-1.5 font-mono text-[9px] leading-normal text-zinc-300">
+																							{(() => { try { return JSON.stringify(JSON.parse(resultStr), null, 2); } catch { return resultStr; } })()}
+																						</pre>
+																					</div>
+																				)}
+																			</div>
+																		</details>
+																	);
+																})}
+															</div>
+														)}
+													</div>
+												</div>
 											</div>
+										);
+									});
+								}
+								return rendered;
+							})()}
+
+							{/* Queued Comment Bubble */}
+							{queuedComment && (
+								<div className="animate-fade-in flex w-full justify-end">
+									<div className="flex max-w-[88%] flex-col gap-0.5">
+										<div className="rounded-xl rounded-tr-none border border-dashed border-amber-500/40 bg-amber-500/5 p-2.5 text-xs leading-relaxed text-amber-300/80">
+											<div className="mb-1 flex items-center gap-1.5">
+												<MessageSquarePlus className="h-3 w-3 text-amber-500/70" />
+												<span className="text-[9px] font-bold uppercase tracking-wider text-amber-500/70">Queued Comment</span>
+											</div>
+											<div className="text-xs text-amber-200/70">{queuedComment}</div>
+											<div className="mt-1.5 text-[9px] italic text-amber-500/50">Waiting for current tool call to complete...</div>
 										</div>
 									</div>
-								);
-							})}
+								</div>
+							)}
 
 							{/* Streaming Message renderers */}
 							{(streamingThinking || streamingResponse) && (
@@ -2610,14 +2643,7 @@ END OF DEBUG COMPILATION
 													<div className="whitespace-pre-wrap font-mono text-[10px] leading-normal text-amber-500/80">{streamingThinking}</div>
 												</div>
 											)}
-											{streamingResponse && (
-												<div
-													className="markdown-body"
-													dangerouslySetInnerHTML={{
-														__html: renderMarkdown(streamingResponse),
-													}}
-												/>
-											)}
+											{streamingResponse && <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamingResponse) }} />}
 										</div>
 									</div>
 								</div>
@@ -2659,11 +2685,35 @@ END OF DEBUG COMPILATION
 						</div>
 
 						<div className="flex items-end gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-inner transition-all focus-within:!border-blue-600 hover:border-zinc-700/60">
-							<textarea ref={inputRef} rows={1} value={inputMessage} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder="Ask a question or request page actions..." className="max-h-20 flex-1 resize-none border-none bg-transparent py-1 text-xs leading-normal text-zinc-200 placeholder-zinc-600 outline-none" />
+							<textarea ref={inputRef} rows={1} value={inputMessage} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={isGenerating ? "Type a comment to queue for the agent..." : "Ask a question or request page actions..."} className="max-h-20 flex-1 resize-none border-none bg-transparent py-1 text-xs leading-normal text-zinc-200 placeholder-zinc-600 outline-none" />
 
-							<Button type="submit" disabled={isGenerating || !inputMessage.trim()} size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-blue-600 text-white shadow-md hover:bg-blue-500">
-								<Send className="h-3 w-3" />
-							</Button>
+							{isGenerating && !inputMessage.trim() ? (
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button type="button" onClick={handleStopAgent} size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-rose-600 text-white shadow-md hover:bg-rose-500 animate-pulse">
+											<Square className="h-3 w-3" />
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent className="custom-tooltip rounded-lg border border-zinc-850 bg-[#0e1118] px-2.5 py-1.5 text-[11px] text-zinc-300 shadow-2xl">
+										<span>Stop Agent Execution</span>
+									</TooltipContent>
+								</Tooltip>
+							) : isGenerating && inputMessage.trim() ? (
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<Button type="submit" size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-amber-600 text-white shadow-md hover:bg-amber-500">
+											<MessageSquarePlus className="h-3 w-3" />
+										</Button>
+									</TooltipTrigger>
+									<TooltipContent className="custom-tooltip rounded-lg border border-zinc-850 bg-[#0e1118] px-2.5 py-1.5 text-[11px] text-zinc-300 shadow-2xl">
+										<span>Queue Comment for Agent</span>
+									</TooltipContent>
+								</Tooltip>
+							) : (
+								<Button type="submit" disabled={!inputMessage.trim()} size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-blue-600 text-white shadow-md hover:bg-blue-500">
+									<Send className="h-3 w-3" />
+								</Button>
+							)}
 						</div>
 					</form>
 				</footer>
