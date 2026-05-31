@@ -143,6 +143,88 @@ export default function App() {
 	const approvedChatUrlRef = useRef("");
 	const aiIsChangingUrlRef = useRef(false);
 
+	// Device privacy states
+	const [showDevicePrivacyPrompt, setShowDevicePrivacyPrompt] = useState(false);
+	const [devicePrivacyTimer, setDevicePrivacyTimer] = useState(30);
+	const [shareOsAndPlatform, setShareOsAndPlatform] = useState(true);
+	const [shareHardware, setShareHardware] = useState(true);
+	const [shareNetworkAndLocal, setShareNetworkAndLocal] = useState(false);
+	const devicePrivacyResolveRef = useRef(null);
+
+	const handleResolveDeviceDetails = async (sendOs, sendHardware, sendNetwork) => {
+		setShowDevicePrivacyPrompt(false);
+		const resolve = devicePrivacyResolveRef.current;
+		if (!resolve) return;
+		devicePrivacyResolveRef.current = null;
+
+		// Gather platform info
+		const platform = await new Promise((res) => chrome.runtime.getPlatformInfo(res));
+
+		let battery = { level: "unknown", charging: "unknown" };
+		try {
+			const batt = await navigator.getBattery();
+			battery = {
+				level: `${Math.round(batt.level * 100)}%`,
+				charging: batt.charging
+			};
+		} catch { /* ignore */ }
+
+		const result = { success: true };
+
+		if (sendOs) {
+			result.platform = {
+				os: platform.os,
+				architecture: platform.arch
+			};
+		}
+
+		if (sendHardware) {
+			result.hardware = {
+				cpuCores: navigator.hardwareConcurrency || "unknown",
+				approximateRamGb: navigator.deviceMemory || "unknown",
+				screenResolution: `${window.screen.width}x${window.screen.height}`,
+				pixelRatio: window.devicePixelRatio
+			};
+		}
+
+		if (sendNetwork) {
+			result.localization = {
+				timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+				language: navigator.language,
+				languages: navigator.languages
+			};
+			result.network = {
+				onlineStatus: navigator.onLine ? "online" : "offline",
+				effectiveType: navigator.connection?.effectiveType || "unknown",
+				downlinkMbps: navigator.connection?.downlink || "unknown",
+				rttMs: navigator.connection?.rtt || "unknown"
+			};
+			result.battery = battery;
+		}
+
+		resolve(result);
+	};
+
+	// Device Privacy countdown timer
+	useEffect(() => {
+		let interval = null;
+		if (showDevicePrivacyPrompt) {
+			interval = setInterval(() => {
+				setDevicePrivacyTimer((prev) => {
+					if (prev <= 1) {
+						clearInterval(interval);
+						handleResolveDeviceDetails(true, true, false); // Auto resolve fallback
+						return 0;
+					}
+					return prev - 1;
+				});
+			}, 1000);
+		}
+		return () => {
+			if (interval) clearInterval(interval);
+		};
+	}, [showDevicePrivacyPrompt]);
+
 	// Theme states (light vs dark mode)
 	const [theme, setTheme] = useState("dark");
 
@@ -1165,6 +1247,14 @@ END OF DEBUG COMPILATION
 					parameters: { type: "object", properties: {} },
 				},
 			},
+			{
+				type: "function",
+				function: {
+					name: "get_device_details",
+					description: "Retrieve comprehensive details about the user's host device, operating system, processor architecture, hardware capabilities, timezone, and network status.",
+					parameters: { type: "object", properties: {} },
+				},
+			},
 		];
 
 		try {
@@ -1740,6 +1830,14 @@ END OF DEBUG COMPILATION
 						success: true,
 						message: "System notified of upcoming URL change.",
 					});
+					return;
+				case "get_device_details":
+					devicePrivacyResolveRef.current = resolve;
+					setShareOsAndPlatform(true);
+					setShareHardware(true);
+					setShareNetworkAndLocal(false);
+					setDevicePrivacyTimer(30);
+					setShowDevicePrivacyPrompt(true);
 					return;
 				default:
 					reject(new Error(`Unknown tool action: ${toolName}`));
@@ -2718,6 +2816,88 @@ END OF DEBUG COMPILATION
 									Continue in Current Chat
 								</Button>
 								<div className="text-zinc-550 mt-1 text-center text-[9px] font-medium italic leading-snug">Note: Starting a new chat is highly recommended to keep context clean and get more accurate answers!</div>
+							</CardFooter>
+						</Card>
+					</div>
+				)}
+
+				{/* Device details privacy selection prompt overlay modal */}
+				{showDevicePrivacyPrompt && (
+					<div className="animate-fade-in absolute inset-0 z-40 flex items-center justify-center bg-background/60 p-4 backdrop-blur-md">
+						<Card className="animate-scale-up flex w-full max-w-[290px] flex-col gap-4 border-zinc-800 bg-zinc-950/90 p-4 shadow-2xl">
+							<CardHeader className="flex flex-col items-center gap-1.5 p-0 text-center">
+								<div className="relative mb-1 flex h-10 w-10 items-center justify-center rounded-full bg-blue-500/10">
+									<ShieldAlert className="h-5 w-5 text-blue-400" />
+									<span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 font-mono text-[9px] font-bold text-zinc-950 animate-pulse">
+										{devicePrivacyTimer}
+									</span>
+								</div>
+								<CardTitle className="text-xs font-bold tracking-tight text-zinc-200">Device Privacy Request</CardTitle>
+								<CardDescription className="text-zinc-400 text-[10px] leading-normal">
+									The agent requested details about this device. Choose what you want to share.
+								</CardDescription>
+							</CardHeader>
+
+							<CardContent className="flex flex-col gap-3 p-0">
+								<div className="flex flex-col gap-2 rounded-lg border border-zinc-850 bg-zinc-900/40 p-2.5">
+									<label className="flex cursor-pointer items-start gap-2.5 select-none text-left">
+										<input
+											type="checkbox"
+											checked={shareOsAndPlatform}
+											onChange={(e) => setShareOsAndPlatform(e.target.checked)}
+											className="mt-0.5 h-3.5 w-3.5 cursor-pointer rounded border-zinc-700 bg-zinc-950 text-blue-600 accent-blue-500 focus:ring-0 focus:ring-offset-0"
+										/>
+										<div className="flex flex-col">
+											<span className="text-[10px] font-bold text-zinc-200">OS & Platform</span>
+											<span className="text-[9px] leading-snug text-zinc-400">OS Name (e.g. Linux), CPU Arch (e.g. x64)</span>
+										</div>
+									</label>
+
+									<label className="mt-1 flex cursor-pointer items-start gap-2.5 select-none text-left border-t border-zinc-850 pt-2">
+										<input
+											type="checkbox"
+											checked={shareHardware}
+											onChange={(e) => setShareHardware(e.target.checked)}
+											className="mt-0.5 h-3.5 w-3.5 cursor-pointer rounded border-zinc-700 bg-zinc-950 text-blue-600 accent-blue-500 focus:ring-0 focus:ring-offset-0"
+										/>
+										<div className="flex flex-col">
+											<span className="text-[10px] font-bold text-zinc-200">Hardware Info</span>
+											<span className="text-[9px] leading-snug text-zinc-400">Logical CPU Cores, System Memory, Resolution</span>
+										</div>
+									</label>
+
+									<label className="mt-1 flex cursor-pointer items-start gap-2.5 select-none text-left border-t border-zinc-850 pt-2">
+										<input
+											type="checkbox"
+											checked={shareNetworkAndLocal}
+											onChange={(e) => setShareNetworkAndLocal(e.target.checked)}
+											className="mt-0.5 h-3.5 w-3.5 cursor-pointer rounded border-zinc-700 bg-zinc-950 text-blue-600 accent-blue-500 focus:ring-0 focus:ring-offset-0"
+										/>
+										<div className="flex flex-col">
+											<span className="text-[10px] font-bold text-zinc-200">Network & Timezone</span>
+											<span className="text-[9px] leading-snug text-zinc-400">Connection Speed, Timezone, Language</span>
+										</div>
+									</label>
+								</div>
+							</CardContent>
+
+							<CardFooter className="flex flex-col gap-2 p-0">
+								<Button
+									onClick={() => handleResolveDeviceDetails(shareOsAndPlatform, shareHardware, shareNetworkAndLocal)}
+									className="w-full cursor-pointer rounded-lg bg-blue-600 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-500"
+								>
+									Send Selected Details
+								</Button>
+								<Button
+									variant="ghost"
+									onClick={() => handleResolveDeviceDetails(false, false, false)}
+									className="border-zinc-850 w-full rounded-lg border py-2 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
+								>
+									Block / Send Nothing
+								</Button>
+								<div className="text-zinc-500 text-[8px] font-medium text-center leading-normal">
+									Timeout: Automatically shares OS & Hardware in {devicePrivacyTimer}s
+								</div>
 							</CardFooter>
 						</Card>
 					</div>
