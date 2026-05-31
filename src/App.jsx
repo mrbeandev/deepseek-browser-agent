@@ -79,9 +79,9 @@ export default function App() {
 	const [maxTokens, setMaxTokens] = useState(2048);
 
 	// V4 Thinking states
-	const [enableThinking, setEnableThinking] = useState(false);
-	const [reasoningEffort, setReasoningEffort] = useState("high");
-	const [showToolCallsDetail, setShowToolCallsDetail] = useState(true);
+	const [enableThinking, setEnableThinking] = useState(true);
+	const [reasoningEffort, setReasoningEffort] = useState("medium");
+	const [showToolCallsDetail, setShowToolCallsDetail] = useState(false);
 
 	// Tab states
 	const [activeTabId, setActiveTabId] = useState(null);
@@ -341,9 +341,9 @@ export default function App() {
 			}
 			setTemperature(result.temperature !== undefined ? parseFloat(result.temperature) : 0.2);
 			setMaxTokens(result.maxTokens !== undefined ? parseInt(result.maxTokens) : 2048);
-			setEnableThinking(result.enableThinking !== undefined ? result.enableThinking : false);
-			setReasoningEffort(result.reasoningEffort || "high");
-			setShowToolCallsDetail(result.showToolCallsDetail !== undefined ? result.showToolCallsDetail : true);
+			setEnableThinking(result.enableThinking !== undefined ? result.enableThinking : true);
+			setReasoningEffort(result.reasoningEffort || "medium");
+			setShowToolCallsDetail(result.showToolCallsDetail !== undefined ? result.showToolCallsDetail : false);
 
 			const loadedChats = result.chats || {};
 			let loadedMeta = result.chatMetadata || {};
