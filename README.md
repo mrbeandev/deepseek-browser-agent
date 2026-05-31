@@ -6,6 +6,14 @@ Built with a gorgeous glassmorphic UI, it perfectly transitions between high-con
 
 ---
 
+## 🎬 Live Demo
+
+Watch Deepseek Browser Agent in action! Check out our live demo videos showing various browser automation scenarios (including Google Sheets automation, Trilium Notes setup, device details tool permission prompts, and settings drawer customizations):
+
+👉 **[Watch the Live Demo Videos on Google Drive](https://drive.google.com/drive/folders/1PgjFFVeX4oi-YD2UL1c_QVmKMTlaHV6U?usp=sharing)**
+
+---
+
 ## 🌟 Key Features
 
 ### 🧠 1. Fully Agentic Browser Control (Tool Calling)
