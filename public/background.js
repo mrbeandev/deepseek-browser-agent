@@ -1,4 +1,4 @@
-// DeepSeek Agentic Sidebar Background Service Worker
+// Deepseek Browser Agent Background Service Worker
 
 // 1. Enable Side Panel to open when clicking the extension toolbar icon
 chrome.runtime.onInstalled.addListener(() => {
@@ -8,13 +8,13 @@ chrome.runtime.onInstalled.addListener(() => {
   // Create context menus for advanced user experience
   chrome.contextMenus.create({
     id: "summarize-page",
-    title: "Summarize Page with DeepSeek Agent",
+    title: "Summarize Page with Deepseek Browser Agent",
     contexts: ["page"]
   });
 
   chrome.contextMenus.create({
     id: "explain-selection",
-    title: "Explain selected text with DeepSeek Agent",
+    title: "Explain selected text with Deepseek Browser Agent",
     contexts: ["selection"]
   });
 });

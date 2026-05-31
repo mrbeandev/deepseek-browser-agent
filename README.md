@@ -1,6 +1,6 @@
-# 🐋 DeepSeek Agentic Sidebar
+# 🐋 Deepseek Browser Agent
 
-An advanced, premium browser side panel extension powered by the **DeepSeek V4 API**. This extension acts as a fully agentic personal assistant that lives inside your browser side panel, equipped with powerful tools to read, search, click, scroll, navigate, and automate tasks across any standard webpage.
+An advanced, premium browser side panel extension powered by the **Deepseek V4 API**. This extension acts as a fully agentic browser agent that lives inside your browser side panel, equipped with powerful tools to read, search, click, scroll, navigate, and automate tasks across any standard webpage.
 
 Built with a gorgeous glassmorphic UI, it perfectly transitions between high-contrast Dark and Light modes, utilizes instant-response Shadcn tooltips, and supports advanced AI reasoning models.
 
@@ -9,7 +9,7 @@ Built with a gorgeous glassmorphic UI, it perfectly transitions between high-con
 ## 🌟 Key Features
 
 ### 🧠 1. Fully Agentic Browser Control (Tool Calling)
-DeepSeek Agent doesn't just read the page—it *controls* the browser! Equipped with autonomous client tools, the agent can:
+Deepseek Browser Agent doesn't just read the page—it *controls* the browser! Equipped with autonomous client tools, the agent can:
 *   **Scrape Page Text**: Extract the primary readable content from any webpage instantly for summary or analysis.
 *   **Extract Page Links**: Gather, group, and map out all hyperlinks on the active document.
 *   **Query DOM Structure**: Inspect CSS selectors and document layout structures.
@@ -30,7 +30,7 @@ DeepSeek Agent doesn't just read the page—it *controls* the browser! Equipped 
 ### 💾 4. Session History & Settings Panel
 *   **Auto-Saved Sessions**: Chat logs are preserved under local scopes (`website-specific`, `domain-level`, or `global`).
 *   **AI Session Auto-Naming**: Generates creative titles for your conversation logs automatically.
-*   **Cost & Usage Balance Tracker**: Directly fetch your DeepSeek account balance, token allocation limits, and server statuses.
+*   **Cost & Usage Balance Tracker**: Directly fetch your Deepseek account balance, token allocation limits, and server statuses.
 *   **Reasoning effort toggles**: Stream reasoning chain-of-thought CoT blocks and select from `Low`, `Medium`, and `High` reasoning effort levels.
 *   **Detailed Tool Calls toggle**: Control whether detailed, collapsible tool parameters and execution results are displayed. When disabled, it condenses tool call logs into an elegant, professional separating element containing the exact action count (e.g. `--- 10 tool calls ---`), fading beautifully on both sides to keep the conversation clean.
 
@@ -53,8 +53,8 @@ Make sure you have [Node.js](https://nodejs.org/) (v18 or higher) and `npm` inst
 
 ### 2. Clone the Repository
 ```bash
-git clone https://github.com/your-username/deepseek-personal-assistant.git
-cd deepseek-personal-assistant
+git clone https://github.com/your-username/deepseek-browser-agent.git
+cd deepseek-browser-agent
 ```
 
 ### 3. Install Dependencies
@@ -89,7 +89,7 @@ To install the built extension in your Google Chrome browser:
 
 ## 🤝 Contributing Guidelines
 
-We love contributions! If you want to help make DeepSeek Agentic Sidebar even better, please follow these guidelines:
+We love contributions! If you want to help make Deepseek Browser Agent even better, please follow these guidelines:
 
 ### How to Contribute
 1.  **Fork** the repository and create your feature branch:
@@ -116,7 +116,7 @@ We love contributions! If you want to help make DeepSeek Agentic Sidebar even be
 
 ## 🗺️ Custom Skills & Extension Roadmap
 
-We are planning to turn DeepSeek Agentic Sidebar into a highly modular, customizable AI copilot. Below is our active roadmap, focusing heavily on equipping the agent with dynamic **Modular Markdown Skills** and browser automation capabilities. We welcome any contributions or pull requests aiming to check off these items!
+We are planning to turn Deepseek Browser Agent into a highly modular, customizable AI copilot. Below is our active roadmap, focusing heavily on equipping the agent with dynamic **Modular Markdown Skills** and browser automation capabilities. We welcome any contributions or pull requests aiming to check off these items!
 
 ### 🔌 Modular Skills Engine (Markdown Skills)
 *   **[ ] Markdown-Based Skill Files (`.md`)**:
@@ -126,12 +126,12 @@ We are planning to turn DeepSeek Agentic Sidebar into a highly modular, customiz
     *   Let users write or install custom JavaScript "skills" (similar to Greasemonkey/Tampermonkey scripts) that the agent can execute autonomously on specific domains.
     *   *Example*: An "Auto-Invoice Downloader" skill for Stripe billing portals.
 *   **[ ] Model Context Protocol (MCP) Client**:
-    *   Integrate an MCP client inside the sidebar to allow the DeepSeek Agent to communicate with local or remote MCP servers (GitHub, local databases, Google Docs, calendars).
+    *   Integrate an MCP client inside the sidebar to allow the Deepseek Browser Agent to communicate with local or remote MCP servers (GitHub, local databases, Google Docs, calendars).
     *   *Example*: Equip the agent with a "Local Terminal" skill or a "Database Query" skill.
 
 ### 🎙️ Advanced Interaction & AI Capabilities
 *   **[ ] Visual Snapshot OCR & Image Decoding Skill**:
-    *   Add a snapshot OCR decoding feature that will capture webpage elements or regions, use a 3rd party vision/OCR service (yet to be decided) to convert the images into detailed text descriptions, and feed them into DeepSeek (since the current models do not support native image inputs).
+    *   Add a snapshot OCR decoding feature that will capture webpage elements or regions, use a 3rd party vision/OCR service (yet to be decided) to convert the images into detailed text descriptions, and feed them into Deepseek (since the current models do not support native image inputs).
 *   **[ ] Real-Time Voice & Speech Skill**:
     *   Integrate Chrome's built-in Web Speech API (transcription & synthesis) to enable fully hands-free browser automation through voice commands.
 *   **[ ] Cost-Efficiency & Token Dashboards**:

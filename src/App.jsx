@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, Settings, Trash2, ShieldAlert, Eye, EyeOff, AlertTriangle, X, Loader2, Check, Copy, History, Globe, Building, FileText, Search, Compass, Plus, Pencil, Sun, Moon, Terminal, Square, MessageSquarePlus } from "lucide-react";
+import { Send, ShieldAlert, AlertTriangle, Loader2, Search, Terminal, Square, MessageSquarePlus, FileText, Compass } from "lucide-react";
 
 // Helper to generate unique session keys (impure function declared outside react context)
 function generateSessionKey() {
@@ -27,19 +27,54 @@ console.error = (...args) => {
 
 // Import official Shadcn components
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+
+import { ChatHeader } from "./components/ChatHeader";
+import { SettingsDialog } from "./components/SettingsDialog";
+
+// Helper to parse and format system messages, particularly active tab change logs with long URLs
+function parseSystemMessage(content) {
+	if (!content) return null;
+	const urlIndex = content.indexOf(" (URL: ");
+	const tabIdIndex = content.lastIndexOf(", Tab ID: ");
+
+	if (urlIndex !== -1 && tabIdIndex !== -1 && tabIdIndex > urlIndex) {
+		const prefix = content.slice(0, urlIndex);
+		const url = content.slice(urlIndex + 7, tabIdIndex);
+		const suffix = content.slice(tabIdIndex);
+
+		// Truncate URL if it's too long
+		const maxLen = 30;
+		const truncatedUrl = url.length > maxLen ? url.slice(0, maxLen) + "..." : url;
+
+		return (
+			<span className="flex items-center gap-1 flex-wrap">
+				<span>{prefix} (URL: </span>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<span className="cursor-pointer underline decoration-dotted text-blue-400 hover:text-blue-300 break-all select-all font-mono">
+							{truncatedUrl}
+						</span>
+					</TooltipTrigger>
+					<TooltipContent className="custom-tooltip max-w-[280px] rounded-lg border border-zinc-850 bg-[#0e1118] px-2.5 py-1.5 text-[11px] text-zinc-300 shadow-2xl leading-normal break-all select-all font-mono">
+						{url}
+					</TooltipContent>
+				</Tooltip>
+				<span>{suffix}</span>
+			</span>
+		);
+	}
+
+	return <span>{content}</span>;
+}
 
 export default function App() {
 	// App state
 	const [apiKey, setApiKey] = useState("");
 	const [endpoint, setEndpoint] = useState("https://api.deepseek.com");
 	const [model, setModel] = useState("deepseek-v4-flash");
-	const [systemPrompt, setSystemPrompt] = useState("You are DeepSeek Agent, a highly capable AI assistant embedded in a web browser sidebar. You are conversing with the user, and you have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be helpful, concise, and professional. Explain what you are doing when you use a tool. ALWAYS RESPOND IN ENGLISH.");
+	const [systemPrompt, setSystemPrompt] = useState("You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH.");
 	const [temperature, setTemperature] = useState(0.2);
 	const [maxTokens, setMaxTokens] = useState(2048);
 
@@ -220,7 +255,7 @@ export default function App() {
 		}
 	}
 
-	// Fetch current user balance from DeepSeek API
+	// Fetch current user balance from Deepseek API
 	async function fetchApiBalance() {
 		if (!apiKey) return;
 		setIsFetchingBalance(true);
@@ -297,7 +332,7 @@ export default function App() {
 			setApiKey(result.apiKey || "");
 			setEndpoint(result.endpoint || "https://api.deepseek.com");
 			setModel(result.model || "deepseek-v4-flash");
-			setSystemPrompt(result.systemPrompt || "You are DeepSeek Agent, a highly capable AI assistant embedded in a web browser sidebar. You are conversing with the user, and you have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be helpful, concise, and professional. Explain what you are doing when you use a tool. ALWAYS RESPOND IN ENGLISH.");
+			setSystemPrompt(result.systemPrompt || "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH.");
 			if (result.activeSessionKey) {
 				setActiveSessionKey(result.activeSessionKey);
 			}
@@ -533,52 +568,27 @@ export default function App() {
 		);
 	};
 
-	// Helper to safely truncate messages without separating tool call responses from their assistant calls
-	function truncateMessages(messages, limit = 50) {
-		if (messages.length <= limit) return messages;
+	// Helper to estimate total context tokens accumulated for the active session
+	const estimateContextTokens = (messages) => {
+		let totalChars = (systemPrompt || "").length;
+		
+		const tabContextStr = `[CURRENT TAB ID: ${activeTabId || ""}]\n[CURRENT TAB URL: ${activeUrl || ""}]\n[CURRENT TAB TITLE: ${activeTabTitle || ""}]`;
+		totalChars += tabContextStr.length;
 
-		// Start with the last `limit` messages
-		let adjustedStartIndex = messages.length - limit;
-
-		// Scan backwards from the end of the candidate slice
-		for (let i = messages.length - 1; i >= adjustedStartIndex; i--) {
-			const msg = messages[i];
-			if (msg.role === "tool") {
-				const toolCallId = msg.toolCallId;
-				// Find the corresponding assistant message in the entire `messages` array
-				let assistantIndex = -1;
-				for (let j = i - 1; j >= 0; j--) {
-					if (messages[j].role === "assistant" && messages[j].toolCalls) {
-						const hasCall = messages[j].toolCalls.some((tc) => tc.id === toolCallId);
-						if (hasCall) {
-							assistantIndex = j;
-							break;
-						}
-					}
-				}
-
-				// If found and it is outside our current slice boundary, extend the boundary backwards
-				if (assistantIndex !== -1 && assistantIndex < adjustedStartIndex) {
-					adjustedStartIndex = assistantIndex;
-				}
+		messages.forEach((m) => {
+			if (m.content) totalChars += m.content.length;
+			if (m.reasoning) totalChars += m.reasoning.length;
+			if (m.toolCalls) {
+				try {
+					totalChars += JSON.stringify(m.toolCalls).length;
+				} catch { /* ignore parsing errors */ }
 			}
-		}
-
-		// Slice from the adjusted start index
-		let result = messages.slice(adjustedStartIndex);
-
-		// Just in case there are still any orphaned tool messages, filter them out
-		result = result.filter((msg, idx) => {
-			if (msg.role === "tool") {
-				const toolCallId = msg.toolCallId;
-				const hasAssistant = result.slice(0, idx).some((m) => m.role === "assistant" && m.toolCalls && m.toolCalls.some((tc) => tc.id === toolCallId));
-				return hasAssistant;
-			}
-			return true;
 		});
 
-		return result;
-	}
+		return Math.ceil(totalChars / 4);
+	};
+
+
 
 	// Save new messages to log in local storage
 	function saveMessageLog(newMessages) {
@@ -601,7 +611,7 @@ export default function App() {
 		setChats((prevChats) => {
 			const updatedChats = {
 				...prevChats,
-				[key]: truncateMessages(newMessages, 50),
+				[key]: newMessages,
 			};
 			chrome.storage.local.set({ chats: updatedChats });
 			return updatedChats;
@@ -873,7 +883,7 @@ export default function App() {
 
 			// 5. Compile everything into a comprehensive markdown template
 			const debugOutput = `
-# DEEPSEEK WEB AGENT DEBUG COMPILATION
+# DEEPSEEK BROWSER AGENT DEBUG COMPILATION
 ========================================
 Generated At: ${new Date().toLocaleString()}
 Active Domain: ${activeDomain}
@@ -970,7 +980,7 @@ END OF DEBUG COMPILATION
 		const updated = addLocalMessage("user", text);
 
 		if (!apiKey) {
-			addLocalMessage("assistant", "⚠️ **DeepSeek API Key is missing!** Open configurations (gear icon) to save your credentials.");
+			addLocalMessage("assistant", "⚠️ **Deepseek API Key is missing!** Open configurations (gear icon) to save your credentials.");
 			return;
 		}
 
@@ -1179,7 +1189,7 @@ END OF DEBUG COMPILATION
 					break;
 				}
 
-				// Compile messages payload mapped exactly to OpenAI/DeepSeek specifications
+				// Compile messages payload mapped exactly to OpenAI/Deepseek specifications
 				let payloadMessages = [{ role: "system", content: systemPrompt }];
 
 				// Inject active tab context (current Tab ID, URL, and Title) so the AI always knows its active page
@@ -1190,7 +1200,7 @@ END OF DEBUG COMPILATION
 					payloadMessages.push({ role: "system", content: extraSystemContext });
 				}
 
-				// Add history mapping reasoning_content and tool_calls context seamlessly
+				// Add history mapping reasoning_content and tool_calls context seamlessly in full (no truncation)
 				activeMessages.forEach((m) => {
 					if (m.role === "user") {
 						payloadMessages.push({ role: "user", content: m.content });
@@ -1620,7 +1630,7 @@ END OF DEBUG COMPILATION
 			const updatedMessages = [...currentMessages, newSystemMsg];
 			const updatedChats = {
 				...prevChats,
-				[key]: truncateMessages(updatedMessages, 50),
+				[key]: updatedMessages,
 			};
 			chrome.storage.local.set({ chats: updatedChats });
 			return updatedChats;
@@ -2211,97 +2221,19 @@ END OF DEBUG COMPILATION
 		<TooltipProvider delayDuration={10}>
 			<div className={`relative flex h-screen w-screen flex-col overflow-hidden bg-background font-sans text-foreground ${theme}`}>
 				{/* 1. Header Bar */}
-				<header className="z-30 flex items-center justify-between border-b border-border bg-card p-2.5 shadow-sm">
-					<div className="flex min-w-0 max-w-[60%] items-center gap-2">
-						<img
-							src={activeFavicon}
-							className="h-5 w-5 flex-shrink-0 rounded-md border border-zinc-800 bg-zinc-900 object-contain p-0.5"
-							alt="favicon"
-							onError={(e) => {
-								e.target.src = "icons/icon16.png";
-							}}
-						/>
-						<div className="flex min-w-0 flex-col">
-							<span className="text-zinc-550 mb-0.5 text-sm font-bold uppercase leading-none tracking-wider">Active Host</span>
-							<span className="truncate text-xs font-semibold leading-tight text-zinc-200">{activeDomain}</span>
-						</div>
-					</div>
-
-					<div className="flex flex-shrink-0 items-center gap-1.5">
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button variant="ghost" size="icon-xs" onClick={handleNewChat} className="border border-zinc-800/40 bg-zinc-900/50 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200">
-									<Plus className="h-3.5 w-3.5" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>
-								<span>New Chat</span>
-							</TooltipContent>
-						</Tooltip>
-
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button variant="ghost" size="icon-xs" onClick={handleCopyDebugLogs} className="border border-zinc-800/40 bg-zinc-900/50 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200">
-									<Copy className="h-3 w-3.5" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>
-								<span>Copy Debug Logs</span>
-							</TooltipContent>
-						</Tooltip>
-
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button variant="ghost" size="icon-xs" onClick={handleToggleTheme} className="border border-zinc-800/40 bg-zinc-900/50 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200">
-									{theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>
-								<span>{theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}</span>
-							</TooltipContent>
-						</Tooltip>
-
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									variant={showToolCallsDetail ? "secondary" : "ghost"}
-									size="icon-xs"
-									onClick={() => {
-										const next = !showToolCallsDetail;
-										setShowToolCallsDetail(next);
-										chrome.storage.local.set({ showToolCallsDetail: next });
-									}}
-									className={`border transition-all duration-200 ${showToolCallsDetail ? "border-blue-500/35 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300" : "border-zinc-800/40 bg-zinc-900/50 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200 opacity-60"}`}
-								>
-									<Terminal className={`h-3.5 w-3.5 ${showToolCallsDetail ? "animate-pulse" : ""}`} />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>
-								<span>{showToolCallsDetail ? "Hide Tool Call Details" : "Show Tool Call Details"}</span>
-							</TooltipContent>
-						</Tooltip>
-
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button
-									variant={showSettings ? "secondary" : "ghost"}
-									size="icon-xs"
-									onClick={() => {
-										const next = !showSettings;
-										setShowSettings(next);
-										if (next) fetchApiBalance();
-									}}
-									className="border border-zinc-800/40 bg-zinc-900/50 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
-								>
-									<Settings className="h-3 w-3" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>
-								<span>Settings</span>
-							</TooltipContent>
-						</Tooltip>
-					</div>
-				</header>
+				<ChatHeader
+					activeFavicon={activeFavicon}
+					activeDomain={activeDomain}
+					theme={theme}
+					showToolCallsDetail={showToolCallsDetail}
+					showSettings={showSettings}
+					handleNewChat={handleNewChat}
+					handleCopyDebugLogs={handleCopyDebugLogs}
+					handleToggleTheme={handleToggleTheme}
+					setShowToolCallsDetail={setShowToolCallsDetail}
+					setShowSettings={setShowSettings}
+					fetchApiBalance={fetchApiBalance}
+				/>
 
 				{/* 2. API Key Warning Alert banner */}
 				{apiKeyMissing && (
@@ -2338,11 +2270,11 @@ END OF DEBUG COMPILATION
 					{getMessages().length === 0 ? (
 						<div className="animate-fade-in my-auto flex flex-col items-center p-4 text-center">
 							<div className="relative mb-4 flex items-center justify-center">
-								<img src="icons/icon128.png" className="relative z-10 h-20 w-20 rounded-lg object-contain drop-shadow-[0_4px_12px_rgba(37,99,235,0.15)] filter" alt="DeepSeek" />
+								<img src="icons/icon128.png" className="relative z-10 h-20 w-20 rounded-lg object-contain drop-shadow-[0_4px_12px_rgba(37,99,235,0.15)] filter" alt="Deepseek Browser Agent" />
 							</div>
 
-							<h1 className="mb-0.5 text-base font-bold tracking-tight text-zinc-100">DeepSeek Web Agent</h1>
-							<p className="mb-5 max-w-[85%] text-[11px] leading-relaxed text-zinc-500">Interact, extract, and automate operations on this website using standard DeepSeek models.</p>
+							<h1 className="mb-0.5 text-base font-bold tracking-tight text-zinc-100">Deepseek Browser Agent</h1>
+							<p className="mb-5 max-w-[85%] text-[11px] leading-relaxed text-zinc-500">Interact, extract, and automate operations on this website using standard Deepseek models.</p>
 
 							<div className="flex w-full flex-col gap-1.5">
 								<span className="pl-1 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-500">Preset Operations</span>
@@ -2402,10 +2334,10 @@ END OF DEBUG COMPILATION
 												continue;
 											}
 											rendered.push(
-												<div key={`sys-${i}`} className="animate-fade-in flex justify-center">
-													<div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 font-mono text-[10px] text-zinc-500">
-														<div className="h-1 w-1 animate-pulse rounded-full bg-blue-500" />
-														<span>{msg.content}</span>
+												<div key={`sys-${i}`} className="animate-fade-in flex justify-center max-w-full">
+													<div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 font-mono text-[10px] text-zinc-500 max-w-[95%] overflow-hidden">
+														<div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500 shrink-0" />
+														<div className="leading-normal">{parseSystemMessage(msg.content)}</div>
 													</div>
 												</div>
 											);
@@ -2425,7 +2357,7 @@ END OF DEBUG COMPILATION
 																<ShieldAlert className="h-4 w-4 text-amber-500/80" />
 																<span>Scope Elevation Requested</span>
 															</CardTitle>
-															<CardDescription className="mt-1 text-xs leading-relaxed text-zinc-300">DeepSeek requests browser access.</CardDescription>
+															<CardDescription className="mt-1 text-xs leading-relaxed text-zinc-300">Deepseek Browser Agent requests browser access.</CardDescription>
 														</CardHeader>
 														<CardContent className="pb-2 text-xs text-zinc-300">
 															<p className="border-l border-amber-500/25 pl-1.5 text-[10px] italic text-zinc-400">Reason: &quot;{msg.reason}&quot;</p>
@@ -2440,55 +2372,68 @@ END OF DEBUG COMPILATION
 											continue;
 										}
 										if (msg.role === "assistant") {
-											let toolCallCount = 0;
-											let j = i;
-											let lastAssistantWithContent = null;
-											while (j < allMsgs.length && allMsgs[j].role !== "user") {
-												const m = allMsgs[j];
-												if (m.role === "assistant") {
-													if (m.toolCalls && m.toolCalls.length > 0) toolCallCount += m.toolCalls.length;
-													if (m.content && m.content.trim() !== "") lastAssistantWithContent = m;
-												}
-												j++;
-											}
-											if (toolCallCount > 0) {
+											// Render the assistant verbal content (if any, omitting thoughts/reasoning)
+											if (msg.content && msg.content.trim() !== "") {
 												rendered.push(
-													<div key={`tc-sep-${i}`} className="animate-fade-in">
-														<Tooltip>
-															<TooltipTrigger asChild>
-																<div className="flex items-center my-3 text-[10px] text-zinc-450 dark:text-zinc-500 select-none w-full cursor-help hover:opacity-85 transition-opacity">
-																	<div className="flex-1 h-[1px] bg-gradient-to-r from-transparent to-zinc-300 dark:to-zinc-800/80" />
-																	<span className="px-3 font-mono font-bold tracking-wide text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 whitespace-nowrap">
-																		--- {toolCallCount} tool {toolCallCount === 1 ? "call" : "calls"} ---
-																	</span>
-																	<div className="flex-1 h-[1px] bg-gradient-to-l from-transparent to-zinc-300 dark:to-zinc-800/80" />
-																</div>
-															</TooltipTrigger>
-															<TooltipContent className="custom-tooltip flex max-w-[260px] flex-col gap-1.5 rounded-lg border border-zinc-850 bg-[#0e1118] p-2.5 text-[11px] text-zinc-300 shadow-2xl leading-normal">
-																<span className="font-semibold text-zinc-100">Tool Calls Hidden</span>
-																<span>To view details of all active tools, enable detailed tool logs in the top header by clicking the</span>
-																<span className="flex items-center gap-1 w-max rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-blue-400 tracking-wide uppercase select-none">
-																	<Terminal className="h-3 w-3" /> Terminal
-																</span>
-																<span>icon.</span>
-															</TooltipContent>
-														</Tooltip>
-													</div>
-												);
-											}
-											if (lastAssistantWithContent) {
-												rendered.push(
-													<div key={`asst-final-${i}`} className="animate-fade-in flex w-full justify-start">
+													<div key={`asst-content-${i}`} className="animate-fade-in flex w-full justify-start">
 														<div className="flex max-w-[88%] flex-col gap-0.5">
 															<div className="border-zinc-850 rounded-xl rounded-tl-none border bg-zinc-950/60 p-2.5 text-xs leading-relaxed text-zinc-300 shadow-sm">
-																<div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(lastAssistantWithContent.content) }} />
+																<div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
 															</div>
 														</div>
 													</div>
 												);
 											}
-											i = j;
-											continue;
+
+											// Aggregated tool calls block starting at this assistant message
+											if (msg.toolCalls && msg.toolCalls.length > 0) {
+												let toolCallCount = 0;
+												let j = i;
+												while (j < allMsgs.length) {
+													const m = allMsgs[j];
+													if (m.role === "user" || m.role === "escalation_request") {
+														break;
+													}
+													if (m.role === "assistant") {
+														// If it's a subsequent assistant message with verbal content, break
+														if (j > i && m.content && m.content.trim() !== "") {
+															break;
+														}
+														if (m.toolCalls && m.toolCalls.length > 0) {
+															toolCallCount += m.toolCalls.length;
+														}
+													}
+													j++;
+												}
+
+												if (toolCallCount > 0) {
+													rendered.push(
+														<div key={`tc-sep-${i}`} className="animate-fade-in">
+															<Tooltip>
+																<TooltipTrigger asChild>
+																	<div className="flex items-center my-3 text-[10px] text-zinc-450 dark:text-zinc-500 select-none w-full cursor-help hover:opacity-85 transition-opacity">
+																		<div className="flex-1 h-[1px] bg-gradient-to-r from-transparent to-zinc-300 dark:to-zinc-800/80" />
+																		<span className="px-3 font-mono font-bold tracking-wide text-zinc-400 dark:text-zinc-500 flex items-center gap-1.5 whitespace-nowrap">
+																			--- {toolCallCount} tool {toolCallCount === 1 ? "call" : "calls"} ---
+																		</span>
+																		<div className="flex-1 h-[1px] bg-gradient-to-l from-transparent to-zinc-300 dark:to-zinc-800/80" />
+																	</div>
+																</TooltipTrigger>
+																<TooltipContent className="custom-tooltip flex max-w-[260px] flex-col gap-1.5 rounded-lg border border-zinc-850 bg-[#0e1118] p-2.5 text-[11px] text-zinc-300 shadow-2xl leading-normal">
+																	<span className="font-semibold text-zinc-100">Tool Calls Hidden</span>
+																	<span>To view details of all active tools, enable detailed tool logs in the top header by clicking the</span>
+																	<span className="flex items-center gap-1 w-max rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-blue-400 tracking-wide uppercase select-none">
+																		<Terminal className="h-3 w-3" /> Terminal
+																	</span>
+																	<span>icon.</span>
+																</TooltipContent>
+															</Tooltip>
+														</div>
+													);
+												}
+												i = j;
+												continue;
+											}
 										}
 										i++;
 									}
@@ -2497,10 +2442,10 @@ END OF DEBUG COMPILATION
 										if (msg.role === "system") {
 											if (msg.content.startsWith("Agent action:") || msg.content.startsWith("Completed tool:") || msg.content.startsWith("Blocked:")) return;
 											rendered.push(
-												<div key={`sys-${index}`} className="animate-fade-in flex justify-center">
-													<div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 font-mono text-[10px] text-zinc-500">
-														<div className="h-1 w-1 animate-pulse rounded-full bg-blue-500" />
-														<span>{msg.content}</span>
+												<div key={`sys-${index}`} className="animate-fade-in flex justify-center max-w-full">
+													<div className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950/40 px-2.5 py-1 font-mono text-[10px] text-zinc-500 max-w-[95%] overflow-hidden">
+														<div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500 shrink-0" />
+														<div className="leading-normal">{parseSystemMessage(msg.content)}</div>
 													</div>
 												</div>
 											);
@@ -2516,7 +2461,7 @@ END OF DEBUG COMPILATION
 																<ShieldAlert className="h-4 w-4 text-amber-500/80" />
 																<span>Scope Elevation Requested</span>
 															</CardTitle>
-															<CardDescription className="mt-1 text-xs leading-relaxed text-zinc-300">DeepSeek requests browser access.</CardDescription>
+															<CardDescription className="mt-1 text-xs leading-relaxed text-zinc-300">Deepseek Browser Agent requests browser access.</CardDescription>
 														</CardHeader>
 														<CardContent className="pb-2 text-xs text-zinc-300">
 															<p className="border-l border-amber-500/25 pl-1.5 text-[10px] italic text-zinc-400">Reason: &quot;{msg.reason}&quot;</p>
@@ -2532,17 +2477,26 @@ END OF DEBUG COMPILATION
 										rendered.push(
 											<div key={`msg-${index}`} className={`animate-fade-in flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
 												<div className="flex max-w-[88%] flex-col gap-0.5">
-													<div className={`rounded-xl p-2.5 text-xs leading-relaxed ${msg.role === "user" ? "rounded-tr-none border border-zinc-800 bg-zinc-900 text-zinc-100" : "border-zinc-850 rounded-tl-none border bg-zinc-950/60 text-zinc-300 shadow-sm"}`}>
+													<div className={`rounded-xl text-xs leading-relaxed ${msg.role === "user" ? "rounded-tr-none border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-zinc-100" : "p-2.5 border-zinc-850 rounded-tl-none border bg-zinc-950/60 text-zinc-300 shadow-sm"}`}>
 														{msg.reasoning && (
-															<div className="mb-2 max-w-full rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
-																<div className="text-[10px] font-bold text-amber-500 uppercase tracking-wider mb-1 select-none">Thinking Process</div>
-																<div className="whitespace-pre-wrap font-mono text-[10px] leading-normal text-amber-500/80">{msg.reasoning}</div>
-															</div>
+															<details className="group mb-2 max-w-full rounded-lg border border-amber-500/20 bg-amber-500/5 overflow-hidden transition-all duration-200">
+																<summary className="flex items-center justify-between px-2.5 py-1.5 bg-amber-500/5 cursor-pointer hover:bg-amber-500/10 transition-colors select-none font-mono text-[9px] font-bold text-amber-500 uppercase tracking-widest list-none">
+																	<div className="flex items-center gap-1.5">
+																		<span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+																		<span>Thinking Process</span>
+																	</div>
+																	<span className="text-zinc-500 group-open:rotate-180 transition-transform duration-200 font-sans text-xs">▼</span>
+																</summary>
+																<div className="p-2.5 border-t border-amber-500/10 bg-transparent">
+																	<pre className="whitespace-pre-wrap font-mono text-[10px] leading-normal text-amber-500/80 select-text overflow-x-auto">
+																		{msg.reasoning}
+																	</pre>
+																</div>
+															</details>
 														)}
 														{msg.content && <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
 														{msg.toolCalls && msg.toolCalls.length > 0 && (
 															<div className="mt-2 flex w-full flex-col gap-2 border-t border-zinc-800/60 pt-2">
-																<span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400">Actions Executed</span>
 																{msg.toolCalls.map((tc) => {
 																	const toolName = tc.function.name;
 																	const toolArgs = tc.function.arguments || "";
@@ -2668,7 +2622,13 @@ END OF DEBUG COMPILATION
 					<form onSubmit={handleSubmitMessage} className="flex flex-col gap-2">
 						<div className="flex w-full flex-col gap-1.5">
 							<div className="flex items-center justify-between px-1">
-								<div className="flex items-center gap-1.5 text-[10px] font-bold leading-none">
+								<div className="flex items-center gap-1 font-mono text-[9px] font-bold text-zinc-500 leading-none select-none">
+									<span>CONTEXT:</span>
+									<span className="text-blue-500 font-semibold">{estimateContextTokens(getMessages()).toLocaleString()}</span>
+									<span className="text-[8px] opacity-75 font-normal">tokens</span>
+								</div>
+
+								<div className="flex items-center gap-1.5 text-[10px] font-bold leading-none select-none">
 									<span className={`h-1 w-1 rounded-full ${isConnected ? "animate-pulse bg-blue-600" : "bg-rose-500"}`} />
 									<span className={isConnected ? "text-zinc-500" : "text-rose-400"}>{isConnected ? "AUTOMATION ONLINE" : "AUTOMATION LINK OFFLINE"}</span>
 								</div>
@@ -2761,289 +2721,52 @@ END OF DEBUG COMPILATION
 				)}
 
 				{/* 6. Settings Sidebar Drawer */}
-				<div className={`absolute right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border bg-[#07090e] shadow-2xl transition-transform duration-300 ease-out ${showSettings ? "translate-x-0" : "translate-x-full"}`}>
-					<div className="flex items-center justify-between border-b border-border bg-[#0e1118]/80 p-3">
-						<h2 className="text-xs font-bold tracking-tight text-zinc-200">Configuration Settings</h2>
-						<Button variant="ghost" size="icon-xs" onClick={() => setShowSettings(false)} className="border border-zinc-800/40 text-zinc-400 hover:text-white">
-							<X className="h-3.5 w-3.5" />
-						</Button>
-					</div>
-
-					{/* Tab selection for Settings Preferences vs Saved Sessions */}
-					<div className="border-zinc-850 flex shrink-0 border-b bg-zinc-950/20 px-2 py-1">
-						<button onClick={() => setSettingsTab("preferences")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "preferences" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "border border-transparent bg-transparent text-zinc-500 hover:text-zinc-300"}`}>
-							<Settings className="h-3.5 w-3.5" />
-							<span>Preferences</span>
-						</button>
-						<button onClick={() => setSettingsTab("sessions")} className={`flex flex-1 items-center justify-center gap-1.5 rounded-md py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${settingsTab === "sessions" ? "border border-zinc-800/60 bg-zinc-900/60 text-blue-400" : "text-zinc-555 border border-transparent bg-transparent hover:text-zinc-300"}`}>
-							<History className="h-3.5 w-3.5" />
-							<span>Saved Sessions</span>
-						</button>
-					</div>
-
-					<div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-						{settingsTab === "preferences" ? (
-							<>
-								<div className="flex flex-col gap-1.5">
-									<label className="text-[10px] font-bold text-zinc-400">DeepSeek API Key</label>
-									<div className="relative flex items-center">
-										<Input type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="placeholder-zinc-750 border-zinc-800 bg-zinc-950/40 pr-10 font-mono text-xs text-white focus-visible:ring-blue-600/35" />
-										<Button type="button" variant="ghost" size="icon-xs" onClick={() => setShowKey(!showKey)} className="text-zinc-550 absolute right-1 hover:bg-transparent hover:text-zinc-200">
-											{showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-										</Button>
-									</div>
-
-									{/* Test API Key Connection Button & Status */}
-									<div className="mt-1 flex items-center justify-between">
-										<Button type="button" variant="outline" size="xs" onClick={handleTestApiKey} disabled={isTestingKey} className="hover:bg-zinc-850 h-6 rounded border-zinc-800 bg-zinc-900/60 px-2.5 text-[10px] font-bold text-zinc-300 transition-all hover:text-white">
-											{isTestingKey ? (
-												<>
-													<Loader2 className="mr-1 h-3 w-3 animate-spin text-blue-500" />
-													Testing...
-												</>
-											) : (
-												"Test Connection"
-											)}
-										</Button>
-
-										{testResult && (
-											<div className={`animate-fade-in flex items-center gap-1 text-[10px] font-medium ${testResult.success ? "text-emerald-400" : "text-rose-400"}`}>
-												{testResult.success ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-rose-500" />}
-												<span className="max-w-[130px] truncate" title={testResult.message}>
-													{testResult.message}
-												</span>
-											</div>
-										)}
-									</div>
-								</div>
-
-								{/* DeepSeek API Balance Card */}
-								{apiBalance ? (
-									<div className="animate-fade-in mt-0.5 flex flex-col gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-2.5">
-										<div className="flex items-center justify-between">
-											<span className="text-[10px] font-bold text-zinc-400">DeepSeek Balance</span>
-											<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 font-mono text-[10px] text-blue-400 transition-colors hover:text-blue-300 disabled:opacity-50">
-												<span>{isFetchingBalance ? "Refreshing..." : "Refresh"}</span>
-											</button>
-										</div>
-										<div className="mt-0.5 flex items-baseline gap-1">
-											<span className="text-zinc-150 font-mono text-sm font-extrabold">{apiBalance.total}</span>
-											<span className="font-mono text-[10px] font-bold text-zinc-500">{apiBalance.currency}</span>
-											{!apiBalance.available && <span className="ml-2 rounded-sm border border-rose-500/20 bg-rose-500/10 px-1 text-[10px] font-bold text-rose-400">UNAVAILABLE</span>}
-										</div>
-									</div>
-								) : (
-									apiKey && (
-										<div className="mt-0.5 flex justify-end">
-											<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="cursor-pointer border-none bg-transparent p-0 font-mono text-[10px] text-zinc-500 transition-colors hover:text-zinc-300 disabled:opacity-50">
-												{isFetchingBalance ? "Loading balance..." : "Show current balance"}
-											</button>
-										</div>
-									)
-								)}
-
-								<div className="flex flex-col gap-1.5">
-									<label className="text-[10px] font-bold text-zinc-400">API Endpoint</label>
-									<Input type="text" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35" />
-								</div>
-
-								<div className="flex flex-col gap-1.5">
-									<label className="text-[10px] font-bold text-zinc-400">Preferred AI Model</label>
-									<Select value={model} onValueChange={(val) => setModel(val)}>
-										<SelectTrigger className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
-											<SelectValue placeholder="Select model" />
-										</SelectTrigger>
-										<SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-300">
-											<SelectItem value="deepseek-v4-flash" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-												deepseek-v4-flash (Fast)
-											</SelectItem>
-											<SelectItem value="deepseek-v4-pro" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-												deepseek-v4-pro (Pro)
-											</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-
-								{/* V4 Thinking Settings */}
-								<div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-									<div className="flex items-center justify-between">
-										<div className="flex flex-col gap-0.5">
-											<label className="text-[10px] font-bold text-zinc-400">Enable Deep Thinking</label>
-											<span className="text-[10px] text-zinc-500">Stream reasoning CoT block</span>
-										</div>
-										<Switch checked={enableThinking} onCheckedChange={(checked) => setEnableThinking(checked)} />
-									</div>
-
-									{enableThinking && (
-										<div className="animate-fade-in mt-2 flex flex-col gap-1.5">
-											<label className="text-[10px] font-bold text-zinc-400">Reasoning Effort</label>
-											<Select value={reasoningEffort} onValueChange={(val) => setReasoningEffort(val)}>
-												<SelectTrigger className="h-7 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
-													<SelectValue placeholder="Select effort" />
-												</SelectTrigger>
-												<SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-300">
-													<SelectItem value="low" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-														Low
-													</SelectItem>
-													<SelectItem value="medium" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-														Medium
-													</SelectItem>
-													<SelectItem value="high" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-														High (Recommended)
-													</SelectItem>
-												</SelectContent>
-											</Select>
-											<span className="flex items-start gap-1 text-[10px] leading-normal text-amber-500/70">
-												<AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-												<span>Thinking Mode supports dynamic concurrent active DOM tool calling under V4 API specifications.</span>
-											</span>
-										</div>
-									)}
-								</div>
-
-								{/* Tool Calls Settings */}
-								<div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-									<div className="flex items-center justify-between">
-										<div className="flex flex-col gap-0.5">
-											<label className="text-[10px] font-bold text-zinc-400">Detailed Tool Calls</label>
-											<span className="text-[10px] text-zinc-500">Show step-by-step action details</span>
-										</div>
-										<Switch checked={showToolCallsDetail} onCheckedChange={(checked) => setShowToolCallsDetail(checked)} />
-									</div>
-								</div>
-
-								<div className="flex flex-col gap-1.5">
-									<label className="text-[10px] font-bold text-zinc-400">Agent System Instructions</label>
-									<Textarea rows={4} value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} className="h-[15vh] resize-none border border-zinc-800 bg-zinc-950/40 font-sans text-xs leading-relaxed text-zinc-300 focus-visible:ring-blue-600/35" />
-								</div>
-
-								<div className="flex gap-2">
-									<div className="flex w-[30%] flex-col gap-1.5">
-										<label className="text-[10px] font-bold text-zinc-400">Temp</label>
-										<Input type="number" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
-									</div>
-									<div className="flex w-[35%] flex-col gap-1.5">
-										<label className="text-[10px] font-bold text-zinc-400">Max Tokens</label>
-										<Input type="number" min="1" max="8192" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
-									</div>
-									<div className="flex w-[35%] flex-col gap-1.5">
-										<label className="text-[10px] font-bold text-zinc-400">Max Steps</label>
-										<Input type="number" min="1" max="100" value={maxIterations} onChange={(e) => setMaxIterations(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
-									</div>
-								</div>
-
-								<Button onClick={saveConfiguration} className="mt-4 w-full cursor-pointer rounded-lg bg-blue-600 py-2 text-center text-xs font-bold text-white hover:bg-blue-500">
-									Save Configuration
-								</Button>
-
-								{saveSuccess && <div className="animate-fade-in text-center text-xs text-emerald-400">✓ Configuration updated!</div>}
-							</>
-						) : (
-							<div className="flex flex-col gap-2 p-1">
-								{Object.values(chatMetadata).length === 0 ? (
-									<div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
-										<History className="text-zinc-650 h-8 w-8 animate-pulse" />
-										<p className="text-[10px] font-medium text-zinc-500">No saved sessions yet.</p>
-										<p className="text-zinc-650 max-w-[180px] text-center text-[9px]">Start a conversation in any scope to automatically save history logs.</p>
-									</div>
-								) : (
-									Object.values(chatMetadata)
-										.sort((a, b) => b.timestamp - a.timestamp)
-										.map((session) => {
-											const dateStr = new Date(session.timestamp).toLocaleString();
-											const isActive = getChatKey() === session.key;
-
-											return (
-												<div key={session.key} onClick={() => handleLoadSession(session)} className={`group relative flex cursor-pointer select-none flex-col gap-2.5 rounded-xl border p-3 transition-all duration-200 ${isActive ? "border-blue-500/40 bg-blue-600/5 shadow-[0_0_10px_rgba(59,130,246,0.05)] hover:border-blue-500/60" : "border-zinc-900 bg-zinc-950/40 hover:border-zinc-800/80 hover:bg-zinc-900/10"}`}>
-													<div className="flex items-start justify-between gap-2">
-														{editingSessionKey === session.key ? (
-															<div className="mr-4 flex flex-1 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-																<Input
-																	value={editingTitleText}
-																	onChange={(e) => setEditingTitleText(e.target.value)}
-																	onKeyDown={(e) => {
-																		if (e.key === "Enter") {
-																			handleSaveTitle(session.key);
-																		} else if (e.key === "Escape") {
-																			setEditingSessionKey(null);
-																		}
-																	}}
-																	onBlur={() => handleSaveTitle(session.key)}
-																	autoFocus
-																	className="h-6 rounded border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-[10px] text-zinc-200 focus-visible:ring-1 focus-visible:ring-blue-500"
-																/>
-															</div>
-														) : (
-															<div className="flex flex-1 items-center gap-2 truncate">
-																<span className="shrink-0">{session.scope === "global" ? <Globe className="h-3.5 w-3.5 text-purple-400" /> : session.scope === "domain" ? <Building className="h-3.5 w-3.5 text-amber-400" /> : <FileText className="h-3.5 w-3.5 text-blue-400" />}</span>
-																<h3 className={`truncate text-[10px] font-bold ${isActive ? "text-blue-400" : "text-zinc-200 group-hover:text-white"}`} title={session.title}>
-																	{session.title}
-																</h3>
-																<Tooltip>
-																	<TooltipTrigger asChild>
-																		<button onClick={(e) => handleStartEditTitle(session, e)} className="text-zinc-550 shrink-0 cursor-pointer rounded border-none bg-transparent p-0.5 transition-colors hover:text-zinc-200">
-																			<Pencil className="h-3 w-3" />
-																		</button>
-																	</TooltipTrigger>
-																	<TooltipContent>
-																		<span>Rename Session</span>
-																	</TooltipContent>
-																</Tooltip>
-															</div>
-														)}
-
-														{/* Delete Session Button */}
-														<Tooltip>
-															<TooltipTrigger asChild>
-																<button onClick={(e) => handleDeleteSession(session.key, e)} className="text-zinc-650 shrink-0 cursor-pointer rounded border-none bg-transparent p-0.5 opacity-0 transition-opacity hover:bg-zinc-900 hover:text-rose-400 group-hover:opacity-100">
-																	<Trash2 className="h-3.5 w-3.5" />
-																</button>
-															</TooltipTrigger>
-															<TooltipContent>
-																<span>Delete Session</span>
-															</TooltipContent>
-														</Tooltip>
-													</div>
-
-													{/* Professional Webpage / Domain Link Display */}
-													{(session.url && session.url !== "none" && session.url !== "") || (session.domain && session.domain !== "none" && session.domain !== "") ? (
-														<div className="flex flex-col gap-1 font-mono text-[9px]">
-															{session.domain && session.domain !== "none" && session.domain !== "" && (
-																<div className="flex max-w-full items-center gap-1.5 rounded-md border border-zinc-900 bg-zinc-950/70 px-2 py-1 text-[9px] text-zinc-500">
-																	<Building className="h-3.5 w-3.5 shrink-0 text-amber-500/70" />
-																	<span className="flex-1 truncate text-zinc-400">{session.domain}</span>
-																</div>
-															)}
-															{session.url && session.url !== "none" && session.url !== "" && (
-																<div className="flex max-w-full items-center gap-1.5 overflow-hidden rounded-md border border-zinc-900 bg-zinc-950/70 px-2 py-1 text-[9px] text-zinc-500 transition-colors hover:text-zinc-300">
-																	<Compass className="h-3.5 w-3.5 shrink-0 text-blue-500/70" />
-																	<span className="flex-1 truncate text-zinc-400" title={session.url}>
-																		{session.url}
-																	</span>
-																</div>
-															)}
-														</div>
-													) : null}
-
-													<div className="mt-1 flex items-center justify-between text-[9px] text-zinc-600">
-														<span className={`rounded-sm px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${session.scope === "global" ? "bg-purple-500/10 text-purple-400" : session.scope === "domain" ? "bg-amber-500/10 text-amber-400" : "bg-blue-500/10 text-blue-400"}`}>{session.scope}</span>
-														<span className="font-sans font-medium">{dateStr}</span>
-													</div>
-
-													{isActive && (
-														<span className="absolute right-1 top-1 flex h-1.5 w-1.5">
-															<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
-															<span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-blue-500"></span>
-														</span>
-													)}
-												</div>
-											);
-										})
-								)}
-							</div>
-						)}
-					</div>
-				</div>
+				<SettingsDialog
+					showSettings={showSettings}
+					setShowSettings={setShowSettings}
+					settingsTab={settingsTab}
+					setSettingsTab={setSettingsTab}
+					apiKey={apiKey}
+					setApiKey={setApiKey}
+					showKey={showKey}
+					setShowKey={setShowKey}
+					endpoint={endpoint}
+					setEndpoint={setEndpoint}
+					model={model}
+					setModel={setModel}
+					enableThinking={enableThinking}
+					setEnableThinking={setEnableThinking}
+					reasoningEffort={reasoningEffort}
+					setReasoningEffort={setReasoningEffort}
+					showToolCallsDetail={showToolCallsDetail}
+					setShowToolCallsDetail={setShowToolCallsDetail}
+					systemPrompt={systemPrompt}
+					setSystemPrompt={setSystemPrompt}
+					temperature={temperature}
+					setTemperature={setTemperature}
+					maxTokens={maxTokens}
+					setMaxTokens={setMaxTokens}
+					maxIterations={maxIterations}
+					setMaxIterations={setMaxIterations}
+					isTestingKey={isTestingKey}
+					handleTestApiKey={handleTestApiKey}
+					testResult={testResult}
+					apiBalance={apiBalance}
+					isFetchingBalance={isFetchingBalance}
+					fetchApiBalance={fetchApiBalance}
+					saveConfiguration={saveConfiguration}
+					saveSuccess={saveSuccess}
+					chatMetadata={chatMetadata}
+					editingSessionKey={editingSessionKey}
+					setEditingSessionKey={setEditingSessionKey}
+					editingTitleText={editingTitleText}
+					setEditingTitleText={setEditingTitleText}
+					handleSaveTitle={handleSaveTitle}
+					handleStartEditTitle={handleStartEditTitle}
+					handleDeleteSession={handleDeleteSession}
+					handleLoadSession={handleLoadSession}
+					getChatKey={getChatKey}
+				/>
 			</div>
 		</TooltipProvider>
 	);

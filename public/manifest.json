@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "DeepSeek Agentic Sidebar",
+  "name": "Deepseek Browser Agent",
   "version": "2.0",
-  "description": "An advanced agentic sidebar powered by DeepSeek AI for visual snapshots, domain-level memory, and browser-wide automation.",
+  "description": "An advanced browser agent powered by Deepseek AI for visual snapshots, domain-level memory, and browser-wide automation.",
   "permissions": [
     "sidePanel",
     "activeTab",
@@ -18,7 +18,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Open DeepSeek Agentic Sidebar",
+    "default_title": "Open Deepseek Browser Agent",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

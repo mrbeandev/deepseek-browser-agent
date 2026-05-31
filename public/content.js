@@ -1,4 +1,4 @@
-// DeepSeek Agentic Sidebar Content Script
+// Deepseek Browser Agent Content Script
 // This script runs on the active webpage and communicates with the Sidebar.
 
 // Local page error logs buffer in content.js for debugging
@@ -77,7 +77,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: false, error: "Unknown action: " + request.action });
     }
   } catch (error) {
-    console.error("Error in DeepSeek Content Script listener:", error);
+    console.error("Error in Deepseek Browser Agent Content Script listener:", error);
     sendResponse({ success: false, error: error.message });
   }
 

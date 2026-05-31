@@ -16,7 +16,7 @@
 		--popover: 240 10% 4%;
 		--popover-foreground: 240 5% 96%;
 
-		--primary: 221.2 83.2% 53.3%; /* DeepSeek Brand Blue (#2563eb) */
+		--primary: 221.2 83.2% 53.3%; /* Deepseek Brand Blue (#2563eb) */
 		--primary-foreground: 0 0% 100%;
 
 		--secondary: 240 5.9% 12%; /* Zinc-900 */
@@ -117,6 +117,9 @@
 .light .bg-zinc-950\/40,
 .light .bg-zinc-950\/20,
 .light .bg-\[\#07090e\],
+.light .bg-\[\#090b10\],
+.light .bg-\[\#090b10\]\/40,
+.light .bg-\[\#0c0e14\]\/90,
 .light .bg-\[\#0e1118\]\/80 {
 	background-color: #fafafa !important;
 	color: #18181b !important;
@@ -186,7 +189,8 @@
 
 /* Collapsible parameters block */
 .light pre.bg-zinc-950,
-.light pre.bg-zinc-950\/90 {
+.light pre.bg-zinc-950\/90,
+.light pre.bg-\[\#090b10\] {
 	background-color: #f4f4f5 !important;
 	color: #3f3f46 !important;
 	border-color: #e4e4e7 !important;
@@ -317,4 +321,107 @@
 	background-color: transparent !important;
 	border-width: 0 !important;
 	padding: 0 !important;
+}
+
+/* ==========================================================================
+   LIGHT MODE: Code Block Specific Overrides
+   Ensures proper contrast for syntax highlighted code in light theme
+   ========================================================================== */
+
+/* Code block outer container */
+.light .markdown-body div.bg-zinc-50,
+.light .markdown-body div[class*="bg-zinc-50"] {
+	background-color: #f8fafc !important;
+	border-color: #d4d4d8 !important;
+}
+
+/* Code block header bar */
+.light .markdown-body div[class*="bg-zinc-100"] {
+	background-color: #f1f5f9 !important;
+	border-color: #d4d4d8 !important;
+	color: #52525b !important;
+}
+
+/* Code text base color in light mode */
+.light .markdown-body code[class*="text-zinc-700"],
+.light .markdown-body code[class*="text-zinc-300"] {
+	color: #1e293b !important;
+}
+
+/* Syntax highlighting inside code blocks - light mode */
+.light .markdown-body code span[class*="text-zinc-500"] {
+	color: #94a3b8 !important; /* Comments */
+}
+
+.light .markdown-body code span[class*="text-emerald-600"],
+.light .markdown-body code span[class*="text-emerald-400"] {
+	color: #059669 !important; /* Strings: rich emerald */
+}
+
+.light .markdown-body code span[class*="text-blue-600"],
+.light .markdown-body code span[class*="text-blue-400"] {
+	color: #2563eb !important; /* Keywords/keys/output: brand blue */
+}
+
+.light .markdown-body code span[class*="text-amber-600"],
+.light .markdown-body code span[class*="text-amber-500"],
+.light .markdown-body code span[class*="text-amber-400"] {
+	color: #d97706 !important; /* Flags/params/booleans: warm amber */
+}
+
+.light .markdown-body code span[class*="text-violet-600"],
+.light .markdown-body code span[class*="text-violet-400"] {
+	color: #7c3aed !important; /* Numbers: vivid violet */
+}
+
+.light .markdown-body code span[class*="text-zinc-700"],
+.light .markdown-body code span[class*="text-zinc-300"] {
+	color: #1e293b !important; /* YAML values / standard code text */
+}
+
+.light .markdown-body code span[class*="text-zinc-400"],
+.light .markdown-body code span[class*="text-zinc-500"].underline {
+	color: #475569 !important; /* URLs in light mode */
+	text-decoration-color: #475569 !important;
+}
+
+/* Copy button in light mode */
+.light .copy-code-btn {
+	color: #71717a !important;
+}
+.light .copy-code-btn:hover {
+	color: #18181b !important;
+}
+
+/* Inline code in light mode - ensure proper styling */
+.light .markdown-body code:not([id]) {
+	background-color: #f1f5f9 !important;
+	color: #2563eb !important;
+	border-color: #cbd5e1 !important;
+}
+
+/* Headings in light mode */
+.light .markdown-body h1 {
+	color: #09090b !important;
+}
+.light .markdown-body h2 {
+	color: #18181b !important;
+	border-color: #e4e4e7 !important;
+}
+.light .markdown-body h3 {
+	color: #27272a !important;
+}
+.light .markdown-body h4 {
+	color: #3f3f46 !important;
+}
+.light .markdown-body h5 {
+	color: #52525b !important;
+}
+.light .markdown-body h6 {
+	color: #71717a !important;
+}
+
+/* Inline bold/strong in assistant message light mode */
+.light .rounded-tl-none .markdown-body strong {
+	color: #09090b !important;
 }
