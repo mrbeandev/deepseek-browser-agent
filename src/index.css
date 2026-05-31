@@ -1,0 +1,320 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+	body {
+		@apply h-screen w-screen overflow-hidden bg-background font-sans text-foreground antialiased selection:bg-blue-600/30 selection:text-white;
+	}
+	:root {
+		--background: 240 10% 4%;
+		--foreground: 240 5% 96%;
+
+		--card: 240 10% 6%;
+		--card-foreground: 240 5% 96%;
+
+		--popover: 240 10% 4%;
+		--popover-foreground: 240 5% 96%;
+
+		--primary: 221.2 83.2% 53.3%; /* DeepSeek Brand Blue (#2563eb) */
+		--primary-foreground: 0 0% 100%;
+
+		--secondary: 240 5.9% 12%; /* Zinc-900 */
+		--secondary-foreground: 240 5% 96%;
+
+		--muted: 240 5.9% 10%;
+		--muted-foreground: 240 4% 56%; /* Zinc-400 */
+
+		--accent: 240 5.9% 10%;
+		--accent-foreground: 240 5% 96%;
+
+		--destructive: 346.8 77.2% 49.8%;
+		--destructive-foreground: 346.8 0% 100%;
+
+		--border: 240 5.9% 14%; /* Zinc-850 border */
+		--input: 240 5.9% 14%;
+		--ring: 221.2 83.2% 53.3%;
+
+		--radius: 0.5rem; /* Clean minimal border radius */
+	}
+	* {
+		@apply border-border;
+	}
+}
+
+/* Custom minimal scrollbars */
+::-webkit-scrollbar {
+	width: 4px;
+	height: 4px;
+}
+::-webkit-scrollbar-track {
+	background: rgba(0, 0, 0, 0.05);
+}
+::-webkit-scrollbar-thumb {
+	background: rgba(63, 63, 70, 0.4); /* Zinc-700 translucent */
+	border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: rgba(161, 161, 170, 0.5);
+}
+
+/* Markdown typography helper styling inside chat bubbles */
+.markdown-body {
+	@apply text-xs leading-relaxed text-zinc-300;
+}
+
+.markdown-body p {
+	@apply mb-2 last:mb-0;
+}
+
+.markdown-body strong {
+	@apply font-semibold text-zinc-100;
+}
+
+.markdown-body ul {
+	@apply mb-2 list-inside list-disc pl-1;
+}
+
+.markdown-body ol {
+	@apply mb-2 list-inside list-decimal pl-1;
+}
+
+.markdown-body li {
+	@apply mb-0.5;
+}
+
+.markdown-body code {
+	@apply rounded border border-zinc-900/50 bg-zinc-950 px-1 py-0.5 font-mono text-[11px] text-blue-400;
+}
+
+.markdown-body h3 {
+	@apply mb-1.5 mt-3 text-sm font-bold text-zinc-100 first:mt-0;
+}
+
+.markdown-body h4 {
+	@apply mb-1 mt-2.5 text-xs font-bold text-zinc-100;
+}
+
+/* ==========================================================================
+   LIGHT MODE OVERRIDES
+   ========================================================================== */
+.light {
+	--background: 0 0% 100%;
+	--foreground: 240 10% 3.9%;
+	--card: 0 0% 100%;
+	--card-foreground: 240 10% 3.9%;
+	--popover: 0 0% 100%;
+	--popover-foreground: 240 10% 3.9%;
+	--muted: 240 4.8% 96%;
+	--muted-foreground: 240 3.8% 46%;
+	--border: 240 5.9% 88%;
+	--input: 240 5.9% 88%;
+	--primary: 221.2 83.2% 53.3%;
+}
+
+/* General bg/text overrides for static dark styles */
+.light .bg-zinc-950,
+.light .bg-zinc-950\/40,
+.light .bg-zinc-950\/20,
+.light .bg-\[\#07090e\],
+.light .bg-\[\#0e1118\]\/80 {
+	background-color: #fafafa !important;
+	color: #18181b !important;
+}
+
+.light .bg-zinc-900,
+.light .bg-zinc-900\/40,
+.light .bg-zinc-900\/50,
+.light .bg-zinc-950\/60,
+.light .bg-zinc-950\/70,
+.light .bg-zinc-950\/90 {
+	background-color: #f4f4f5 !important;
+	color: #27272a !important;
+}
+
+.light .bg-zinc-900\/60 {
+	background-color: #ffffff !important;
+	color: #2563eb !important;
+	border-color: #d4d4d8 !important;
+}
+
+.light .bg-zinc-900\/60:hover {
+	background-color: #f4f4f5 !important;
+}
+
+.light ::placeholder {
+	color: #a1a1aa !important;
+}
+
+.light .bg-zinc-900\/50:hover {
+	background-color: #e4e4e7 !important;
+}
+
+.light .bg-card {
+	background-color: #ffffff !important;
+	color: #18181b !important;
+}
+
+.light .border-zinc-800,
+.light .border-zinc-850,
+.light .border-zinc-850\/60,
+.light .border-zinc-900,
+.light .border-zinc-900\/50,
+.light .border-zinc-800\/40 {
+	border-color: #e4e4e7 !important;
+}
+
+/* User Message Bubble */
+.light .rounded-tr-none {
+	background-color: #2563eb !important; /* Blue-600 */
+	color: #ffffff !important;
+	border-color: #1d4ed8 !important;
+}
+
+/* User Message Bubble markdown text contrast fix */
+.light .rounded-tr-none .markdown-body,
+.light .rounded-tr-none .markdown-body * {
+	color: #ffffff !important;
+}
+
+/* Assistant Message Bubble */
+.light .bg-zinc-950\/60.text-zinc-300 {
+	background-color: #f4f4f5 !important;
+	color: #27272a !important;
+	border-color: #e4e4e7 !important;
+}
+
+/* Collapsible parameters block */
+.light pre.bg-zinc-950,
+.light pre.bg-zinc-950\/90 {
+	background-color: #f4f4f5 !important;
+	color: #3f3f46 !important;
+	border-color: #e4e4e7 !important;
+}
+
+/* Typography color overrides */
+.light [class*="text-zinc-200"],
+.light [class*="text-zinc-300"],
+.light [class*="text-zinc-100"] {
+	color: #18181b !important;
+}
+
+.light [class*="text-zinc-400"],
+.light [class*="text-zinc-500"],
+.light [class*="text-zinc-550"] {
+	color: #71717a !important;
+}
+
+.light [class*="text-zinc-500"]:hover {
+	color: #18181b !important;
+}
+
+.light .markdown-body {
+	color: #27272a !important;
+}
+
+.light .markdown-body strong {
+	color: #09090b !important;
+}
+
+.light .markdown-body code {
+	background-color: #f4f4f5 !important;
+	color: #2563eb !important;
+	border-color: #e4e4e7 !important;
+}
+
+/* Separator rules styling under light mode */
+.light hr.border-zinc-800\/50 {
+	border-color: #e4e4e7 !important;
+}
+
+/* Blockquotes styling under light mode */
+.light blockquote.bg-zinc-950\/20 {
+	background-color: #f4f4f5 !important;
+	color: #52525b !important;
+	border-left-color: #a1a1aa !important;
+}
+
+/* Table styling under light mode */
+.light .bg-zinc-950\/30 {
+	background-color: #ffffff !important;
+	border-color: #e4e4e7 !important;
+}
+
+.light table.divide-zinc-800 {
+	border-color: #e4e4e7 !important;
+}
+
+.light table thead.bg-zinc-900\/60 {
+	background-color: #f4f4f5 !important;
+	color: #52525b !important;
+}
+
+.light table tbody.divide-zinc-850\/40 {
+	border-color: #e4e4e7 !important;
+}
+
+.light table tr.bg-zinc-950\/10 {
+	background-color: #fafafa !important;
+}
+
+/* Thinking details under light mode */
+.light .bg-amber-500\/5 {
+	background-color: #fffbeb !important;
+	border-color: #fde68a !important;
+}
+
+.light .text-amber-500,
+.light .text-amber-500\/70 {
+	color: #d97706 !important;
+}
+
+/* Alert and warning container overrides under light mode */
+.light .bg-rose-950\/20 {
+	background-color: #fef2f2 !important; /* Soft rose-50 */
+	border-color: #fecaca !important; /* Soft rose-200 */
+	color: #9f1239 !important; /* Dark rose-800 */
+}
+
+.light [class*="border-rose-950"],
+.light [class*="border-rose-900"] {
+	border-color: #fecaca !important;
+}
+
+.light [class*="text-rose-300"],
+.light [class*="text-rose-400"] {
+	color: #9f1239 !important; /* High contrast dark red */
+}
+
+/* Success status overrides under light mode */
+.light [class*="text-emerald-400"],
+.light [class*="text-emerald-500"] {
+	color: #065f46 !important; /* High contrast dark green */
+}
+
+/* Tooltip custom styling - Dark Mode (Default) */
+.custom-tooltip {
+	background-color: #09090b !important;
+	border-color: #27272a !important;
+	color: #f4f4f5 !important;
+}
+
+/* Tooltip custom styling - Light Mode */
+.light .custom-tooltip {
+	background-color: #ffffff !important;
+	border-color: #e4e4e7 !important;
+	color: #18181b !important;
+}
+
+/* Custom code block within pre styling reset */
+.markdown-body pre code {
+	background-color: transparent !important;
+	border-width: 0 !important;
+	padding: 0 !important;
+}
+
+.light pre code {
+	background-color: transparent !important;
+	border-width: 0 !important;
+	padding: 0 !important;
+}
