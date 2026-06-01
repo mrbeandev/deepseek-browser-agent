@@ -1,8 +1,30 @@
-# 🐋 Deepseek Browser Agent
+<p align="center">
+  <img src="public/icons/icon128.png" width="128" height="128" alt="Deepseek Browser Agent Logo" />
+</p>
 
-An advanced, premium browser side panel extension powered by the **Deepseek V4 API**. This extension acts as a fully agentic browser agent that lives inside your browser side panel, equipped with powerful tools to read, search, click, scroll, navigate, and automate tasks across any standard webpage.
+<h1 align="center">🐋 Deepseek Browser Agent</h1>
 
-Built with a gorgeous glassmorphic UI, it perfectly transitions between high-contrast Dark and Light modes, utilizes instant-response Shadcn tooltips, and supports advanced AI reasoning models.
+<p align="center">
+  <strong>An advanced, premium browser side panel extension powered by the Deepseek V4 API.</strong>
+</p>
+
+<p align="center">
+  <img src="https://i.ibb.co/hJnygnhQ/1400-560-banner.png" width="100%" alt="Deepseek Browser Agent Banner" />
+</p>
+
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/bfcmnoalfofnkgkjkpkjgckodmkijndf">
+    <img src="https://img.shields.io/badge/Chrome%20Web%20Store-Active-brightgreen?logo=googlechrome&logoColor=white&style=flat-square" alt="Chrome Web Store Status" />
+  </a>
+  <img src="https://img.shields.io/badge/Manifest-V3-blue?style=flat-square" alt="Manifest V3" />
+  <img src="https://img.shields.io/badge/Licence-MIT-orange?style=flat-square" alt="MIT License" />
+  <img src="https://img.shields.io/badge/Privacy-100%25%20Local-emerald?logo=shield&style=flat-square" alt="100% Local Privacy" />
+  <img src="https://img.shields.io/badge/Engine-Deepseek%20V4-cyan?style=flat-square" alt="Deepseek V4 Engine" />
+</p>
+
+<p align="center">
+  Supercharge your daily workflows! Autonomously browse pages, scrape content, switch tabs, fill out inputs, and stream Chain-of-Thought (CoT) reasoning under granular human-in-the-loop safety switches and glassmorphic UI controls.
+</p>
 
 ---
 
