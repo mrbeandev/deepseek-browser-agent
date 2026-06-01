@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://i.ibb.co/hJnygnhQ/1400-560-banner.png" width="100%" alt="Deepseek Browser Agent Banner" />
+  <img width="100%" alt="Deepseek Browser Agent Banner" src="https://github.com/user-attachments/assets/9ba9df41-30e6-4837-b2c1-dfb76fba7d4f" />
 </p>
 
 <p align="center">
