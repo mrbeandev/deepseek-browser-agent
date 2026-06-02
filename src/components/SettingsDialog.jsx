@@ -88,6 +88,16 @@ const AVAILABLE_TOOLS = [
 		key: "get_device_details",
 		name: "Device & Privacy Details",
 		desc: "Exposes host OS, CPU core counts, localization, and connection."
+	},
+	{
+		key: "execute_js_in_page",
+		name: "Inject Custom Script (Scripting API)",
+		desc: "Runs custom JavaScript code directly in the active tab context using Chrome's Scripting API."
+	},
+	{
+		key: "get_page_diagnostics",
+		name: "Page Diagnostics (Scripting API)",
+		desc: "Diagnoses active tab response times, load times, meta headers, and document health using Chrome's Scripting API."
 	}
 ];
 

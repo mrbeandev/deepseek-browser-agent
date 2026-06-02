@@ -74,7 +74,7 @@ export default function App() {
 	const [apiKey, setApiKey] = useState("");
 	const [endpoint, setEndpoint] = useState("https://api.deepseek.com");
 	const [model, setModel] = useState("deepseek-v4-flash");
-	const [systemPrompt, setSystemPrompt] = useState("You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH. Whenever the user requests setup instructions, scripting guidance, or troubleshooting steps that depend on their host operating system or hardware parameters, you MUST call the \"get_device_details\" tool first to identify their system details and provide a highly targeted response tailored to their active platform.");
+	const [systemPrompt, setSystemPrompt] = useState("You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, navigate, audit page diagnostics, and inject secure custom JavaScript in the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH. Whenever the user requests setup instructions, scripting guidance, or troubleshooting steps that depend on their host operating system or hardware parameters, you MUST call the \"get_device_details\" tool first to identify their system details and provide a highly targeted response tailored to their active platform.");
 	const [temperature, setTemperature] = useState(0.2);
 	const [maxTokens, setMaxTokens] = useState(2048);
 
@@ -97,6 +97,8 @@ export default function App() {
 		switch_to_tab: true,
 		url_changing: true,
 		get_device_details: true,
+		execute_js_in_page: true,
+		get_page_diagnostics: true,
 	});
 
 	// Tab states
@@ -438,7 +440,7 @@ export default function App() {
 
 			let currentPrompt = result.systemPrompt;
 			const oldDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH.";
-			const newDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH. Whenever the user requests setup instructions, scripting guidance, or troubleshooting steps that depend on their host operating system or hardware parameters, you MUST call the \"get_device_details\" tool first to identify their system details and provide a highly targeted response tailored to their active platform.";
+			const newDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, navigate, audit page diagnostics, and inject secure custom JavaScript in the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH. Whenever the user requests setup instructions, scripting guidance, or troubleshooting steps that depend on their host operating system or hardware parameters, you MUST call the \"get_device_details\" tool first to identify their system details and provide a highly targeted response tailored to their active platform.";
 
 			if (currentPrompt === oldDefaultPrompt || !currentPrompt) {
 				currentPrompt = newDefaultPrompt;
@@ -1284,6 +1286,31 @@ END OF DEBUG COMPILATION
 					parameters: { type: "object", properties: {} },
 				},
 			},
+			{
+				type: "function",
+				function: {
+					name: "execute_js_in_page",
+					description: "Execute a custom, secure JavaScript code block directly within the active tab context using Chrome's Scripting API. Use this for complex DOM calculations, custom node parsing, or advanced web automated tasks where standard DOM tools fall short.",
+					parameters: {
+						type: "object",
+						properties: {
+							code: {
+								type: "string",
+								description: "The complete JavaScript code block as a string to be evaluated. It should be wrapped in an immediately invoked function or direct body statements, and can return a value (e.g. 'return document.title;').",
+							},
+						},
+						required: ["code"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "get_page_diagnostics",
+					description: "Run automated diagnostic audits on the active tab page using Chrome's Scripting API. Retrieves page load metrics, DOM completion metrics, SSL status, and full lists of SEO meta headers.",
+					parameters: { type: "object", properties: {} },
+				},
+			},
 		];
 
 		try {
@@ -1871,6 +1898,68 @@ END OF DEBUG COMPILATION
 					setDevicePrivacyTimer(30);
 					setShowDevicePrivacyPrompt(true);
 					return;
+				case "execute_js_in_page": {
+					chrome.scripting.executeScript({
+						target: { tabId: activeTabIdRef.current },
+						func: (codeStr) => {
+							try {
+								const fn = new Function(codeStr);
+								const result = fn();
+								return { success: true, result: result !== undefined ? result : null };
+							} catch (err) {
+								return { success: false, error: err.message };
+							}
+						},
+						args: [args.code]
+					}, (results) => {
+						if (chrome.runtime.lastError) {
+							resolve({ success: false, error: chrome.runtime.lastError.message });
+						} else {
+							resolve(results && results[0]?.result ? results[0].result : { success: true, message: "Script executed successfully but returned no value." });
+						}
+					});
+					return;
+				}
+				case "get_page_diagnostics": {
+					chrome.scripting.executeScript({
+						target: { tabId: activeTabIdRef.current },
+						func: () => {
+							try {
+								const performanceData = {};
+								if (window.performance && window.performance.timing) {
+									const t = window.performance.timing;
+									performanceData.loadTimeMs = t.loadEventEnd - t.navigationStart;
+									performanceData.domReadyTimeMs = t.domComplete - t.responseStart;
+									performanceData.responseTimeMs = t.responseEnd - t.requestStart;
+								}
+								
+								const metaTags = Array.from(document.querySelectorAll('meta')).map(m => ({
+									name: m.getAttribute('name') || m.getAttribute('property') || m.getAttribute('http-equiv'),
+									content: m.getAttribute('content')
+								})).filter(m => m.name && m.content);
+
+								return {
+									success: true,
+									url: window.location.href,
+									title: document.title,
+									ssl: window.location.protocol === 'https:',
+									performance: performanceData,
+									meta: metaTags,
+									consoleCheck: "OK"
+								};
+							} catch (err) {
+								return { success: false, error: err.message };
+							}
+						}
+					}, (results) => {
+						if (chrome.runtime.lastError) {
+							resolve({ success: false, error: chrome.runtime.lastError.message });
+						} else {
+							resolve(results && results[0]?.result ? results[0].result : { success: false, error: "Failed to collect diagnostic data." });
+						}
+					});
+					return;
+				}
 				default:
 					reject(new Error(`Unknown tool action: ${toolName}`));
 					return;
