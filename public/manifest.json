@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Deepseek Browser Agent",
-  "version": "2.1",
+  "version": "2.2",
   "description": "An advanced browser agent powered by Deepseek AI for visual snapshots, domain-level memory, and browser-wide automation.",
   "permissions": [
     "sidePanel",

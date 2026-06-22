@@ -148,6 +148,8 @@ export default function App() {
 	// Balance states
 	const [apiBalance, setApiBalance] = useState(null);
 	const [isFetchingBalance, setIsFetchingBalance] = useState(false);
+	const [fetchedModels, setFetchedModels] = useState(["deepseek-v4-flash", "deepseek-v4-pro"]);
+	const [isFetchingModels, setIsFetchingModels] = useState(false);
 
 	// Iterations limit setting state
 	const [maxIterations, setMaxIterations] = useState(50);
@@ -291,26 +293,31 @@ export default function App() {
 		setIsTestingKey(true);
 		setTestResult(null);
 
-		try {
-			// 1. Try balance endpoint
-			const balanceUrl = `${endpoint.trim()}/user/balance`;
-			const res = await fetch(balanceUrl, {
-				method: "GET",
-				headers: {
-					Authorization: `Bearer ${apiKey.trim()}`,
-					Accept: "application/json",
-				},
-			});
+		const isDeepseek = endpoint.trim().toLowerCase().includes("deepseek.com");
 
-			if (res.ok) {
-				const data = await res.json();
-				if (data && data.balance_infos && data.balance_infos[0]) {
-					const info = data.balance_infos[0];
-					setTestResult({
-						success: true,
-						message: `Valid! Balance: ${info.total_balance} ${info.currency}`,
-					});
-					return;
+		try {
+			if (isDeepseek) {
+				// 1. Try balance endpoint
+				const balanceUrl = `${endpoint.trim()}/user/balance`;
+				const res = await fetch(balanceUrl, {
+					method: "GET",
+					headers: {
+						Authorization: `Bearer ${apiKey.trim()}`,
+						Accept: "application/json",
+					},
+				});
+
+				if (res.ok) {
+					const data = await res.json();
+					if (data && data.balance_infos && data.balance_infos[0]) {
+						const info = data.balance_infos[0];
+						setTestResult({
+							success: true,
+							message: `Valid! Balance: ${info.total_balance} ${info.currency}`,
+						});
+						fetchAvailableModels(endpoint, apiKey);
+						return;
+					}
 				}
 			}
 
@@ -329,6 +336,14 @@ export default function App() {
 					success: true,
 					message: "API Key is valid!",
 				});
+				const data = await modelsRes.json();
+				if (data && Array.isArray(data.data)) {
+					const modelIds = data.data.map(m => m.id);
+					if (modelIds.length > 0) {
+						setFetchedModels(modelIds);
+						chrome.storage.local.set({ fetchedModels: modelIds });
+					}
+				}
 			} else {
 				const errText = await modelsRes.text();
 				let errMsg = `Failed (${modelsRes.status})`;
@@ -360,6 +375,12 @@ export default function App() {
 	// Fetch current user balance from Deepseek API
 	async function fetchApiBalance() {
 		if (!apiKey) return;
+		const isDeepseek = endpoint.trim().toLowerCase().includes("deepseek.com");
+		if (!isDeepseek) {
+			setApiBalance(null);
+			setIsFetchingBalance(false);
+			return;
+		}
 		setIsFetchingBalance(true);
 		try {
 			const balanceUrl = `${endpoint.trim()}/user/balance`;
@@ -387,6 +408,39 @@ export default function App() {
 			setApiBalance(null);
 		} finally {
 			setIsFetchingBalance(false);
+		}
+	}
+
+	// Auto-fetch the models list from the configured base URL
+	async function fetchAvailableModels(customEndpoint, customKey) {
+		const activeEndpoint = (customEndpoint || endpoint || "").trim();
+		const activeKey = (customKey || apiKey || "").trim();
+		if (!activeEndpoint || !activeKey) return;
+
+		setIsFetchingModels(true);
+		try {
+			const modelsUrl = `${activeEndpoint}/models`;
+			const res = await fetch(modelsUrl, {
+				method: "GET",
+				headers: {
+					Authorization: `Bearer ${activeKey}`,
+					Accept: "application/json",
+				},
+			});
+			if (res.ok) {
+				const data = await res.json();
+				if (data && Array.isArray(data.data)) {
+					const modelIds = data.data.map(m => m.id);
+					if (modelIds.length > 0) {
+						setFetchedModels(modelIds);
+						chrome.storage.local.set({ fetchedModels: modelIds });
+					}
+				}
+			}
+		} catch (err) {
+			console.error("Failed to fetch models:", err);
+		} finally {
+			setIsFetchingModels(false);
 		}
 	}
 
@@ -430,13 +484,16 @@ export default function App() {
 
 	// Read settings from storage
 	function loadSettings() {
-		chrome.storage.local.get(["apiKey", "endpoint", "model", "systemPrompt", "temperature", "maxTokens", "chats", "chatMetadata", "enableThinking", "reasoningEffort", "maxIterations", "activeSessionKey", "theme", "showToolCallsDetail", "enabledTools"], (result) => {
+		chrome.storage.local.get(["apiKey", "endpoint", "model", "systemPrompt", "temperature", "maxTokens", "chats", "chatMetadata", "enableThinking", "reasoningEffort", "maxIterations", "activeSessionKey", "theme", "showToolCallsDetail", "enabledTools", "fetchedModels"], (result) => {
 			if (result.enabledTools) {
 				setEnabledTools(result.enabledTools);
 			}
 			setApiKey(result.apiKey || "");
 			setEndpoint(result.endpoint || "https://api.deepseek.com");
 			setModel(result.model || "deepseek-v4-flash");
+			if (result.fetchedModels && Array.isArray(result.fetchedModels)) {
+				setFetchedModels(result.fetchedModels);
+			}
 
 			let currentPrompt = result.systemPrompt;
 			const oldDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH.";
@@ -684,6 +741,7 @@ export default function App() {
 				maxIterations: parseInt(maxIterations) || 50,
 				showToolCallsDetail: showToolCallsDetail,
 				enabledTools: enabledTools,
+				fetchedModels: fetchedModels,
 			},
 			() => {
 				setApiKeyMissing(!trimmedKey);
@@ -3067,6 +3125,9 @@ END OF DEBUG COMPILATION
 					getChatKey={getChatKey}
 					enabledTools={enabledTools}
 					setEnabledTools={setEnabledTools}
+					fetchedModels={fetchedModels}
+					isFetchingModels={isFetchingModels}
+					fetchAvailableModels={fetchAvailableModels}
 				/>
 			</div>
 		</TooltipProvider>

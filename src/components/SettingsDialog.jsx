@@ -148,6 +148,9 @@ export const SettingsDialog = ({
 	getChatKey,
 	enabledTools,
 	setEnabledTools,
+	fetchedModels,
+	isFetchingModels,
+	fetchAvailableModels,
 }) => {
 	return (
 		<div className={`absolute right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border bg-[#07090e] shadow-2xl transition-transform duration-300 ease-out ${showSettings ? "translate-x-0" : "translate-x-full"}`}>
@@ -211,27 +214,29 @@ export const SettingsDialog = ({
 						</div>
 
 						{/* Deepseek API Balance Card */}
-						{apiBalance ? (
-							<div className="animate-fade-in mt-0.5 flex flex-col gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-2.5">
-								<div className="flex items-center justify-between">
-									<span className="text-[11px] font-bold text-zinc-400">Deepseek Balance</span>
-									<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 font-mono text-[11px] text-blue-400 transition-colors hover:text-blue-300 disabled:opacity-50">
-										<span>{isFetchingBalance ? "Refreshing..." : "Refresh"}</span>
-									</button>
+						{endpoint && endpoint.toLowerCase().includes("deepseek.com") && (
+							apiBalance ? (
+								<div className="animate-fade-in mt-0.5 flex flex-col gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-2.5">
+									<div className="flex items-center justify-between">
+										<span className="text-[11px] font-bold text-zinc-400">Deepseek Balance</span>
+										<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 font-mono text-[11px] text-blue-400 transition-colors hover:text-blue-300 disabled:opacity-50">
+											<span>{isFetchingBalance ? "Refreshing..." : "Refresh"}</span>
+										</button>
+									</div>
+									<div className="mt-0.5 flex items-baseline gap-1">
+										<span className="text-zinc-150 font-mono text-sm font-extrabold">{apiBalance.total}</span>
+										<span className="font-mono text-[11px] font-bold text-zinc-500">{apiBalance.currency}</span>
+										{!apiBalance.available && <span className="ml-2 rounded-sm border border-rose-500/20 bg-rose-500/10 px-1 text-[11px] font-bold text-rose-400">UNAVAILABLE</span>}
+									</div>
 								</div>
-								<div className="mt-0.5 flex items-baseline gap-1">
-									<span className="text-zinc-150 font-mono text-sm font-extrabold">{apiBalance.total}</span>
-									<span className="font-mono text-[11px] font-bold text-zinc-500">{apiBalance.currency}</span>
-									{!apiBalance.available && <span className="ml-2 rounded-sm border border-rose-500/20 bg-rose-500/10 px-1 text-[11px] font-bold text-rose-400">UNAVAILABLE</span>}
-								</div>
-							</div>
-						) : (
-							apiKey && (
-								<div className="mt-0.5 flex justify-end">
-									<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="cursor-pointer border-none bg-transparent p-0 font-mono text-[11px] text-zinc-500 transition-colors hover:text-zinc-300 disabled:opacity-50">
-										{isFetchingBalance ? "Loading balance..." : "Show current balance"}
-									</button>
-								</div>
+							) : (
+								apiKey && (
+									<div className="mt-0.5 flex justify-end">
+										<button type="button" onClick={fetchApiBalance} disabled={isFetchingBalance} className="cursor-pointer border-none bg-transparent p-0 font-mono text-[11px] text-zinc-500 transition-colors hover:text-zinc-300 disabled:opacity-50">
+											{isFetchingBalance ? "Loading balance..." : "Show current balance"}
+										</button>
+									</div>
+								)
 							)
 						)}
 
@@ -241,20 +246,49 @@ export const SettingsDialog = ({
 						</div>
 
 						<div className="flex flex-col gap-1.5">
-							<label className="text-[11px] font-bold text-zinc-400">Preferred AI Model</label>
-							<Select value={model} onValueChange={(val) => setModel(val)}>
-								<SelectTrigger className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
-									<SelectValue placeholder="Select model" />
-								</SelectTrigger>
-								<SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-300">
-									<SelectItem value="deepseek-v4-flash" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-										deepseek-v4-flash (Fast)
-									</SelectItem>
-									<SelectItem value="deepseek-v4-pro" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-										deepseek-v4-pro (Pro)
-									</SelectItem>
-								</SelectContent>
-							</Select>
+							<div className="flex items-center justify-between">
+								<label className="text-[11px] font-bold text-zinc-400">Preferred AI Model</label>
+								<button
+									type="button"
+									onClick={() => fetchAvailableModels()}
+									disabled={isFetchingModels || !apiKey || !endpoint}
+									className="cursor-pointer border-none bg-transparent p-0 text-[10px] font-bold text-blue-400 hover:text-blue-300 disabled:opacity-50"
+								>
+									{isFetchingModels ? "Fetching..." : "Fetch Models"}
+								</button>
+							</div>
+							<div className="flex flex-col gap-1.5">
+								<Select
+									value={fetchedModels.includes(model) ? model : "custom"}
+									onValueChange={(val) => {
+										if (val !== "custom") {
+											setModel(val);
+										}
+									}}
+								>
+									<SelectTrigger className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
+										<SelectValue placeholder="Select model" />
+									</SelectTrigger>
+									<SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-300">
+										{fetchedModels.map((m) => (
+											<SelectItem key={m} value={m} className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
+												{m}
+											</SelectItem>
+										))}
+										<SelectItem value="custom" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
+											[Custom Model Name]
+										</SelectItem>
+									</SelectContent>
+								</Select>
+								
+								<Input
+									type="text"
+									value={model}
+									onChange={(e) => setModel(e.target.value)}
+									placeholder="Enter custom model name (e.g. gpt-4o)"
+									className="h-8 border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35"
+								/>
+							</div>
 						</div>
 
 						{/* V4 Thinking Settings */}
