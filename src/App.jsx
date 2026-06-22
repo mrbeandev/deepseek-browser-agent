@@ -160,7 +160,7 @@ export default function App() {
 	// URL Warning states and refs
 	const [showUrlChangeWarning, setShowUrlChangeWarning] = useState(false);
 	const lastVerifiedUrlRef = useRef("");
-	const approvedChatUrlRef = useRef("");
+	const approvedChatUrlsRef = useRef(new Set());
 	const aiIsChangingUrlRef = useRef(false);
 
 	// Device privacy states
@@ -612,20 +612,18 @@ export default function App() {
 				const cleanNewUrl = newUrl.split("#")[0];
 
 				// Initialize approved URL ref on first active tab tracking
-				if (!approvedChatUrlRef.current) {
-					approvedChatUrlRef.current = cleanNewUrl;
+				if (approvedChatUrlsRef.current.size === 0 && cleanNewUrl) {
+					approvedChatUrlsRef.current.add(cleanNewUrl);
 				}
 
-				const cleanApprovedUrl = approvedChatUrlRef.current.split("#")[0];
-
-				if (cleanApprovedUrl && cleanNewUrl && cleanNewUrl !== cleanApprovedUrl) {
+				if (cleanNewUrl && approvedChatUrlsRef.current.size > 0 && !approvedChatUrlsRef.current.has(cleanNewUrl)) {
 					const isChromeSystemPage = cleanNewUrl.startsWith("chrome://") || cleanNewUrl.startsWith("chrome-extension://") || cleanNewUrl.startsWith("about:") || cleanNewUrl.startsWith("devtools://") || cleanNewUrl.includes("chromewebstore.google.com");
 
 					if (!isChromeSystemPage) {
 						if (aiIsChangingUrlRef.current) {
 							// AI changed it, so approve the new URL and reset active warnings
 							aiIsChangingUrlRef.current = false;
-							approvedChatUrlRef.current = cleanNewUrl;
+							approvedChatUrlsRef.current.add(cleanNewUrl);
 							setShowUrlChangeWarning(false);
 						} else {
 							// Human changed it! Show the warning popup
@@ -841,7 +839,7 @@ export default function App() {
 		lastLoggedUrlRef.current = activeUrl;
 		lastLoggedTabIdRef.current = activeTabId;
 		lastVerifiedUrlRef.current = activeUrl;
-		approvedChatUrlRef.current = activeUrl;
+		approvedChatUrlsRef.current = new Set(activeUrl ? [activeUrl.split("#")[0]] : []);
 	};
 
 	// Theme toggle action
@@ -863,7 +861,8 @@ export default function App() {
 		lastLoggedUrlRef.current = activeUrl;
 		lastLoggedTabIdRef.current = activeTabId;
 		lastVerifiedUrlRef.current = session.url || activeUrl;
-		approvedChatUrlRef.current = session.url || activeUrl;
+		const sessionUrl = session.url || activeUrl;
+		approvedChatUrlsRef.current = new Set(sessionUrl ? [sessionUrl.split("#")[0]] : []);
 
 		if (session.url && session.url !== "none" && session.url !== "") {
 			const cleanSessionUrl = session.url.split("#")[0];
@@ -1114,7 +1113,9 @@ END OF DEBUG COMPILATION
 		if (!text) return;
 
 		// Approve the current URL since the user is continuing the chat on this page
-		approvedChatUrlRef.current = activeUrl;
+		if (activeUrl) {
+			approvedChatUrlsRef.current.add(activeUrl.split("#")[0]);
+		}
 
 		if (isGenerating) {
 			// Enqueue intermediate user comment
@@ -1620,7 +1621,9 @@ END OF DEBUG COMPILATION
 		} finally {
 			setIsGenerating(false);
 			setLockedChatKey(null);
-			approvedChatUrlRef.current = activeUrl;
+			if (activeUrl) {
+				approvedChatUrlsRef.current.add(activeUrl.split("#")[0]);
+			}
 		}
 	}
 
@@ -2981,7 +2984,9 @@ END OF DEBUG COMPILATION
 								<Button
 									variant="ghost"
 									onClick={() => {
-										approvedChatUrlRef.current = activeUrl;
+										if (activeUrl) {
+											approvedChatUrlsRef.current.add(activeUrl.split("#")[0]);
+										}
 										setShowUrlChangeWarning(false);
 									}}
 									className="border-zinc-850 w-full rounded-lg border py-2 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
