@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
 	X,
 	Settings as SettingsIcon,
@@ -152,6 +153,7 @@ export const SettingsDialog = ({
 	isFetchingModels,
 	fetchAvailableModels,
 }) => {
+	const [showDropdown, setShowDropdown] = useState(false);
 	return (
 		<div className={`absolute right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border bg-[#07090e] shadow-2xl transition-transform duration-300 ease-out ${showSettings ? "translate-x-0" : "translate-x-full"}`}>
 			<div className="flex items-center justify-between border-b border-border bg-[#0e1118]/80 p-3">
@@ -245,7 +247,7 @@ export const SettingsDialog = ({
 							<Input type="text" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35" />
 						</div>
 
-						<div className="flex flex-col gap-1.5">
+						<div className="flex flex-col gap-1.5 relative">
 							<div className="flex items-center justify-between">
 								<label className="text-[11px] font-bold text-zinc-400">Preferred AI Model</label>
 								<button
@@ -257,37 +259,60 @@ export const SettingsDialog = ({
 									{isFetchingModels ? "Fetching..." : "Fetch Models"}
 								</button>
 							</div>
-							<div className="flex flex-col gap-1.5">
-								<Select
-									value={fetchedModels.includes(model) ? model : "custom"}
-									onValueChange={(val) => {
-										if (val !== "custom") {
-											setModel(val);
-										}
-									}}
-								>
-									<SelectTrigger className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
-										<SelectValue placeholder="Select model" />
-									</SelectTrigger>
-									<SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-300">
-										{fetchedModels.map((m) => (
-											<SelectItem key={m} value={m} className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-												{m}
-											</SelectItem>
-										))}
-										<SelectItem value="custom" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-											[Custom Model Name]
-										</SelectItem>
-									</SelectContent>
-								</Select>
-								
+							<div className="relative">
 								<Input
 									type="text"
 									value={model}
-									onChange={(e) => setModel(e.target.value)}
-									placeholder="Enter custom model name (e.g. gpt-4o)"
-									className="h-8 border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35"
+									onChange={(e) => {
+										setModel(e.target.value);
+										setShowDropdown(true);
+									}}
+									onFocus={() => setShowDropdown(true)}
+									onBlur={() => {
+										// Use 200ms timeout so that mouse down events on items execute first
+										setTimeout(() => setShowDropdown(false), 200);
+									}}
+									placeholder="Search or enter model name (e.g. gpt-4o)"
+									className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35"
 								/>
+								{showDropdown && (
+									<div className="absolute left-0 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 p-1 shadow-xl z-50">
+										{(() => {
+											const term = (model || "").toLowerCase().trim();
+											const filtered = fetchedModels.filter(m => m.toLowerCase().includes(term));
+											const isExactMatch = fetchedModels.some(m => m.toLowerCase() === term);
+
+											return (
+												<>
+													{filtered.length > 0 ? (
+														filtered.map((m) => (
+															<button
+																key={m}
+																type="button"
+																onMouseDown={() => setModel(m)}
+																className="flex w-full cursor-pointer items-center rounded px-2.5 py-1.5 text-left text-xs text-zinc-300 transition-colors hover:bg-blue-600/10 hover:text-blue-400 border-none bg-transparent"
+															>
+																{m}
+															</button>
+														))
+													) : (
+														<div className="px-2.5 py-1.5 text-xs text-zinc-500">No matching models found</div>
+													)}
+
+													{term.length > 0 && !isExactMatch && (
+														<button
+															type="button"
+															onMouseDown={() => setModel(model)}
+															className="flex w-full cursor-pointer items-center gap-1.5 rounded border-t border-zinc-900 bg-transparent px-2.5 py-1.5 text-left text-xs font-semibold text-blue-400 transition-colors hover:bg-blue-600/10"
+														>
+															<span>✨</span> Use custom name: "{model}"
+														</button>
+													)}
+												</>
+											);
+										})()}
+									</div>
+								)}
 							</div>
 						</div>
 
