@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  Supercharge your daily workflows! Autonomously browse pages, scrape content, switch tabs, fill out inputs, and stream Chain-of-Thought (CoT) reasoning under granular human-in-the-loop safety switches and glassmorphic UI controls.
+  Supercharge your daily workflows! Autonomously browse pages, scrape content, fill out inputs, and stream Chain-of-Thought (CoT) reasoning — all confined to the agent's own Chrome tab group, under granular human-in-the-loop safety switches and glassmorphic UI controls.
 </p>
 
 ---
@@ -52,7 +52,7 @@ Deepseek Browser Agent doesn't just read the page—it *controls* the browser! E
 *   **Extract Page Links**: Gather, group, and map out all hyperlinks on the active document.
 *   **Query DOM Structure**: Inspect CSS selectors and document layout structures.
 *   **Click & Fill**: Interact directly with web buttons, inputs, and text fields.
-*   **Navigate & Switch Tabs**: Dynamically browse to new URLs, search all open tabs, and switch focus between tabs under direct AI command.
+*   **Navigate & Open Tabs**: Browse to new URLs and open pages as background tabs inside its own tab group, without ever pulling you away from what you are doing.
 *   **Highlight Match Query**: Search and highlight occurrences of specific keywords in the DOM.
 
 ### 🎨 2. Premium Glassmorphic Dual Themes
@@ -60,9 +60,11 @@ Deepseek Browser Agent doesn't just read the page—it *controls* the browser! E
 *   **Light Mode**: A beautiful, pristine, high-contrast off-white theme with fully refined alert contrast, soft card borders, and elegant brand color highlights.
 *   **Shadcn Tooltips**: Customized Radix UI portals with an **instant 10ms hover delay** for fluid and responsive visual feedback.
 
-### ⏱️ 3. Real-Time Security & Smart Navigation Guardrails
-*   **Tab Switch Warning System**: Automatically alerts the user if the browser tab changes mid-session to protect active context.
-*   **Smart Auto-Dismissal**: When switching tabs back to the original conversing webpage, the warning popup automatically and silently closes!
+### ⏱️ 3. Scoped Workspace & Security Guardrails
+*   **Its Own Tab Group**: The agent works only inside a Chrome tab group named **Deepseek Agent**. Every other tab in your browser is invisible to it — you keep working undisturbed.
+*   **You Control Access**: Drag a tab into the group to share it, drag it out to take it back. Group membership *is* the permission; there is no separate allowlist to manage.
+*   **Never Steals Focus**: Pages are opened and driven in background tabs. The agent switches its own target without changing what you are looking at.
+*   **Storage Safeguards**: A live usage meter warns before local storage fills up, every write failure is surfaced instead of silently swallowed, and chats pause rather than pretending to save.
 *   **Protected System Scopes**: Safely flags restricted browser domains (`chrome://`, `devtools://`, Chrome Web Store) where content script executions are locked.
 
 ### 💾 4. Session History & Settings Panel
