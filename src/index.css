@@ -4,7 +4,7 @@
 
 @layer base {
 	body {
-		@apply h-screen w-screen overflow-hidden bg-background font-sans text-foreground antialiased selection:bg-blue-600/30 selection:text-white;
+		@apply h-screen w-screen overflow-hidden bg-background font-sans text-foreground antialiased selection:bg-foreground/25;
 	}
 	:root {
 		--background: 240 10% 4%;
@@ -16,8 +16,25 @@
 		--popover: 240 10% 4%;
 		--popover-foreground: 240 5% 96%;
 
-		--primary: 221.2 83.2% 53.3%; /* Deepseek Brand Blue (#2563eb) */
-		--primary-foreground: 0 0% 100%;
+		--primary: 0 0% 100%; /* Accent = paper on dark. Monochrome, maximum contrast. */
+		--primary-foreground: 240 10% 4%;
+
+		/* ------------------------------------------------------------------
+		   Monochrome accent system.
+		   There is no brand hue. Emphasis is carried by lightness distance
+		   from the paper, and semantics by fill weight — not by colour.
+		   The four ramps below back the blue / rose / amber / emerald scales
+		   in tailwind.config.js, so every existing utility keeps working and
+		   inverts correctly with the theme.
+		   Dark theme: paper is near-black, so ink runs light.
+		   ------------------------------------------------------------------ */
+		--mono-accent-strong: 0 0% 100%; /* brand + primary emphasis */
+		--mono-accent: 0 0% 93%;
+		--mono-accent-on: 240 10% 4%; /* text sitting ON a solid accent fill */
+
+		--mono-alert: 0 0% 100%; /* danger — loudest, full ink */
+		--mono-warn: 240 5% 74%; /* warning — mid */
+		--mono-ok: 240 4% 54%; /* success — quiet, recedes */
 
 		--secondary: 240 5.9% 12%; /* Zinc-900 */
 		--secondary-foreground: 240 5% 96%;
@@ -33,7 +50,7 @@
 
 		--border: 240 5.9% 14%; /* Zinc-850 border */
 		--input: 240 5.9% 14%;
-		--ring: 221.2 83.2% 53.3%;
+		--ring: 0 0% 100%;
 
 		--radius: 0.5rem; /* Clean minimal border radius */
 	}
@@ -61,6 +78,11 @@
 /* Markdown typography helper styling inside chat bubbles */
 .markdown-body {
 	@apply text-xs leading-relaxed text-zinc-300;
+	/* Long unbroken tokens (URLs, hashes) must wrap, or they force the whole side panel
+	   to scroll horizontally */
+	min-width: 0;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .markdown-body p {
@@ -84,7 +106,7 @@
 }
 
 .markdown-body code {
-	@apply rounded border border-zinc-900/50 bg-zinc-950 px-1 py-0.5 font-mono text-[11px] text-blue-400;
+	@apply rounded border border-zinc-900/50 bg-zinc-950 px-1 py-0.5 font-mono text-[11px] text-zinc-100;
 }
 
 .markdown-body h3 {
@@ -109,7 +131,18 @@
 	--muted-foreground: 240 3.8% 46%;
 	--border: 240 5.9% 88%;
 	--input: 240 5.9% 88%;
-	--primary: 221.2 83.2% 53.3%;
+	--primary: 240 10% 4%;
+	--primary-foreground: 0 0% 100%;
+	--ring: 240 10% 4%;
+
+	/* Light theme: paper is white, so the same ramps run dark. */
+	--mono-accent-strong: 240 10% 4%;
+	--mono-accent: 240 8% 14%;
+	--mono-accent-on: 0 0% 100%;
+
+	--mono-alert: 240 10% 4%;
+	--mono-warn: 240 5% 36%;
+	--mono-ok: 240 4% 50%;
 }
 
 /* General bg/text overrides for static dark styles */
@@ -137,7 +170,7 @@
 
 .light .bg-zinc-900\/60 {
 	background-color: #ffffff !important;
-	color: #2563eb !important;
+	color: #09090b !important;
 	border-color: #d4d4d8 !important;
 }
 
@@ -167,17 +200,26 @@
 	border-color: #e4e4e7 !important;
 }
 
-/* User Message Bubble */
+/* User Message Bubble — inverted paper, the loudest surface in the transcript */
 .light .rounded-tr-none {
-	background-color: #2563eb !important; /* Blue-600 */
+	background-color: #09090b !important;
 	color: #ffffff !important;
-	border-color: #1d4ed8 !important;
+	border-color: #09090b !important;
 }
 
-/* User Message Bubble markdown text contrast fix */
+/* The user bubble is inverted paper in both themes, so everything inside it
+   takes the bubble's own colour rather than the transcript's ink. */
+.msg-user .markdown-body,
+.msg-user .markdown-body *,
 .light .rounded-tr-none .markdown-body,
 .light .rounded-tr-none .markdown-body * {
-	color: #ffffff !important;
+	color: inherit !important;
+}
+
+.msg-user .markdown-body code {
+	background-color: hsl(var(--background) / 0.14) !important;
+	border-color: hsl(var(--background) / 0.25) !important;
+	color: inherit !important;
 }
 
 /* Assistant Message Bubble */
@@ -223,7 +265,7 @@
 
 .light .markdown-body code {
 	background-color: #f4f4f5 !important;
-	color: #2563eb !important;
+	color: #18181b !important;
 	border-color: #e4e4e7 !important;
 }
 
@@ -355,12 +397,12 @@
 
 .light .markdown-body code span[class*="text-emerald-600"],
 .light .markdown-body code span[class*="text-emerald-400"] {
-	color: #059669 !important; /* Strings: rich emerald */
+	color: #52525b !important; /* Strings: quiet grey */
 }
 
 .light .markdown-body code span[class*="text-blue-600"],
 .light .markdown-body code span[class*="text-blue-400"] {
-	color: #2563eb !important; /* Keywords/keys/output: brand blue */
+	color: #09090b !important; /* Keywords/keys/output: full ink */
 }
 
 .light .markdown-body code span[class*="text-amber-600"],
@@ -395,9 +437,9 @@
 
 /* Inline code in light mode - ensure proper styling */
 .light .markdown-body code:not([id]) {
-	background-color: #f1f5f9 !important;
-	color: #2563eb !important;
-	border-color: #cbd5e1 !important;
+	background-color: #f4f4f5 !important;
+	color: #18181b !important;
+	border-color: #d4d4d8 !important;
 }
 
 /* Headings in light mode */
