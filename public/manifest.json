@@ -9,7 +9,8 @@
     "tabs",
     "storage",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "tabGroups"
   ],
   "host_permissions": [
     "<all_urls>"
