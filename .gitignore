@@ -34,4 +34,6 @@ data/
 
 # Local working notes, not part of the shipped extension
 docs/
+CLAUDE.md
 Claude.md
+claude.md
