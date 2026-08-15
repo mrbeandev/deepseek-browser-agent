@@ -2819,8 +2819,10 @@ END OF DEBUG COMPILATION
 			setActiveTabId(targetTabId);
 		}
 
-		// The placeholder is an extension page: no content script, nothing to read
-		const targetTab = await chrome.tabs.get(targetTabId).catch(() => null);
+		// The placeholder is an extension page: no content script, nothing to read. navigate_to
+		// is exempt — putting content ON the placeholder is exactly what it is for, and refusing
+		// it told the model to "use navigate_to", which is what it had just tried.
+		const targetTab = toolName === "navigate_to" ? null : await chrome.tabs.get(targetTabId).catch(() => null);
 		if (targetTab && isWorkspacePlaceholder(targetTab.url)) {
 			return {
 				success: false,
