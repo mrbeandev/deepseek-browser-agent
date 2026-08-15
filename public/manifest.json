@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Deepseek Browser Agent",
-  "version": "2.3",
-  "description": "An advanced browser agent powered by Deepseek AI for visual snapshots, domain-level memory, and browser-wide automation.",
+  "version": "2.4",
+  "description": "Deepseek AI browser agent that works inside its own tab group: page automation, screenshots, and local chat history.",
   "permissions": [
     "sidePanel",
     "activeTab",
@@ -38,8 +38,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]
