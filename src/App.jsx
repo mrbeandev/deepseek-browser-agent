@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Send, ShieldAlert, AlertTriangle, Loader2, Search, Terminal, Square, MessageSquarePlus, FileText, Compass } from "lucide-react";
+import { Send, ShieldAlert, AlertTriangle, Loader2, Search, Terminal, Square, MessageSquarePlus, FileText, Compass, Layers, Image as ImageIcon, Maximize2, Paperclip, X as XIcon } from "lucide-react";
 
 // Helper to generate unique session keys (impure function declared outside react context)
 function generateSessionKey() {
@@ -32,6 +32,37 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/comp
 
 import { ChatHeader } from "./components/ChatHeader";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { CopyButton } from "./components/CopyButton";
+import { ImageLightbox } from "./components/ImageLightbox";
+import {
+	setStorage,
+	getStorage,
+	removeStorage,
+	getStorageUsage,
+	loadAllChats,
+	sessionStorageKey,
+	estimateSessionBytes,
+	formatBytes,
+	WARN_RATIO,
+	CRITICAL_RATIO,
+} from "@/lib/storage";
+import {
+	AGENT_GROUP_TITLE,
+	ensureGroup,
+	getGroupInfo,
+	getGroupTabs,
+	isInGroup,
+	openInGroup,
+	adoptTab,
+	ensureGroupWithTab,
+	isGroupPristine,
+	reconcileStaleWorkspaces,
+	pruneBlankTabs,
+	isWorkspacePlaceholder,
+	releaseGroup,
+	outOfScopeError,
+} from "@/lib/agentTabs";
+import { cropImage, makeThumbnail, dataUrlBytes, getImageSize, stripImagesForStorage, downscaleToMaxEdge, fileToAttachment, CAPTURE_QUALITY } from "@/lib/images";
 
 // Helper to parse and format system messages, particularly active tab change logs with long URLs
 function parseSystemMessage(content) {
@@ -69,6 +100,18 @@ function parseSystemMessage(content) {
 	return <span>{content}</span>;
 }
 
+// A screenshot the agent took. Sessions saved before screenshots had their own role stored
+// them as user messages, so those are recognised too rather than rendering as things the user
+// said.
+function isToolImageMessage(m) {
+	if (!m) return false;
+	if (m.role === "tool_image") return true;
+	// Images the user attached themselves are their message, not a tool result
+	if (m.userUploaded) return false;
+	return m.role === "user" && ((m.images?.length > 0) || (m.thumbnails?.length > 0) || (m.imagesStripped > 0));
+}
+
+
 export default function App() {
 	// App state
 	const [apiKey, setApiKey] = useState("");
@@ -77,6 +120,16 @@ export default function App() {
 	const [systemPrompt, setSystemPrompt] = useState("You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, navigate, audit page diagnostics, and inject secure custom JavaScript in the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH. Whenever the user requests setup instructions, scripting guidance, or troubleshooting steps that depend on their host operating system or hardware parameters, you MUST call the \"get_device_details\" tool first to identify their system details and provide a highly targeted response tailored to their active platform.");
 	const [temperature, setTemperature] = useState(0.2);
 	const [maxTokens, setMaxTokens] = useState(2048);
+
+	// Vision states: opt-in, because /models returns bare ids with no capability metadata
+	const [supportsImages, setSupportsImages] = useState(false);
+	const supportsImagesRef = useRef(false);
+	useEffect(() => {
+		supportsImagesRef.current = supportsImages;
+	}, [supportsImages]);
+
+	// Vision requests are expensive, so only the most recent captures are sent
+	const MAX_IMAGES_PER_REQUEST = 3;
 
 	// V4 Thinking states
 	const [enableThinking, setEnableThinking] = useState(true);
@@ -95,18 +148,32 @@ export default function App() {
 		highlight_text: true,
 		list_open_tabs: true,
 		switch_to_tab: true,
-		url_changing: true,
+		open_tab: true,
+		close_tab: true,
+		use_current_tab: true,
 		get_device_details: true,
 		execute_js_in_page: true,
 		get_page_diagnostics: true,
+		take_screenshot: true,
+		screenshot_element: true,
 	});
 
-	// Tab states
+	// Agent workspace: a native Chrome tab group. Membership is the permission boundary — the
+	// agent can only see and act on tabs inside this group. One group per chat session.
+	const [agentGroupId, setAgentGroupId] = useState(null);
+	const agentGroupIdRef = useRef(null);
+	const [groupTabs, setGroupTabs] = useState([]);
+	const groupTabsRef = useRef([]);
+
+	// The tab the USER is looking at. Read-only awareness so the agent can answer "work on this
+	// page" — it still cannot touch the tab until use_current_tab moves it into the group.
+	const userActiveTabRef = useRef(null);
+
+	// Tab states — these describe the AGENT's target tab, not the user's foreground tab
 	const [activeTabId, setActiveTabId] = useState(null);
 	const [activeDomain, setActiveDomain] = useState("loading...");
 	const [activeFavicon, setActiveFavicon] = useState("icons/icon16.png");
 	const [isConnected, setIsConnected] = useState(false);
-	const [offlineReason, setOfflineReason] = useState("");
 	const [activeUrl, setActiveUrl] = useState("");
 
 	// Chat states
@@ -117,11 +184,15 @@ export default function App() {
 		currentScopeRef.current = currentScope;
 	}, [currentScope]);
 	const [inputMessage, setInputMessage] = useState("");
+	const [attachments, setAttachments] = useState([]); // user-picked images, pending send
+	const [attachError, setAttachError] = useState("");
+	const fileInputRef = useRef(null);
 	const [isGenerating, setIsGenerating] = useState(false);
 	const [userScrolledUp, setUserScrolledUp] = useState(false);
 
 	// UI states
 	const [showSettings, setShowSettings] = useState(false);
+	const [lightbox, setLightbox] = useState(null); // { src, alt, meta } — full-canvas screenshot viewer
 	const [settingsTab, setSettingsTab] = useState("preferences"); // 'preferences', 'sessions'
 	const [chatMetadata, setChatMetadata] = useState({}); // registry of session metadata
 	const [activeTabTitle, setActiveTabTitle] = useState("");
@@ -129,9 +200,12 @@ export default function App() {
 	const [editingTitleText, setEditingTitleText] = useState("");
 	const [showKey, setShowKey] = useState(false);
 	const [saveSuccess, setSaveSuccess] = useState(false);
+	const [saveError, setSaveError] = useState(null);
+	const [isSaving, setIsSaving] = useState(false);
 	const [apiKeyMissing, setApiKeyMissing] = useState(false);
 	const [isTestingKey, setIsTestingKey] = useState(false);
 	const [testResult, setTestResult] = useState(null);
+	const [retryNotice, setRetryNotice] = useState("");
 	const [streamingThinking, setStreamingThinking] = useState("");
 	const [streamingResponse, setStreamingResponse] = useState("");
 
@@ -157,11 +231,90 @@ export default function App() {
 	// Active session key for persistent global-only conversations
 	const [activeSessionKey, setActiveSessionKey] = useState("global_chat_history");
 
-	// URL Warning states and refs
-	const [showUrlChangeWarning, setShowUrlChangeWarning] = useState(false);
-	const lastVerifiedUrlRef = useRef("");
-	const approvedChatUrlsRef = useRef(new Set());
-	const aiIsChangingUrlRef = useRef(false);
+	// Storage health states
+	const [storageUsage, setStorageUsage] = useState(null); // { bytes, quota, ratio }
+	const [storageError, setStorageError] = useState(null); // last write failure message
+	const [storageBlocked, setStorageBlocked] = useState(false); // quota exhausted, chats paused
+	const storageBlockedRef = useRef(false);
+	const usageRefreshTimerRef = useRef(null);
+
+	const refreshStorageUsage = useCallback(async () => {
+		const usage = await getStorageUsage();
+		setStorageUsage(usage);
+		return usage;
+	}, []);
+
+	// Coalesce usage reads: the agent loop writes far more often than the meter needs updating
+	const scheduleUsageRefresh = useCallback(() => {
+		if (usageRefreshTimerRef.current) return;
+		usageRefreshTimerRef.current = setTimeout(() => {
+			usageRefreshTimerRef.current = null;
+			refreshStorageUsage();
+		}, 2000);
+	}, [refreshStorageUsage]);
+
+	// Single funnel for every write. A quota failure pauses chats instead of being swallowed.
+	const persist = useCallback(
+		async (items) => {
+			try {
+				await setStorage(items);
+				setStorageError(null);
+				if (storageBlockedRef.current) {
+					storageBlockedRef.current = false;
+					setStorageBlocked(false);
+				}
+				scheduleUsageRefresh();
+				return true;
+			} catch (err) {
+				console.error("Storage write failed:", err.message);
+				setStorageError(err.message);
+				if (err.isQuota) {
+					storageBlockedRef.current = true;
+					setStorageBlocked(true);
+				}
+				refreshStorageUsage();
+				return false;
+			}
+		},
+		[scheduleUsageRefresh, refreshStorageUsage],
+	);
+
+	// The agent loop used to rewrite the whole archive twice per tool call. The in-memory
+	// transcript still updates immediately; storage is flushed at most every 1.5s and once at
+	// the end of a run.
+	const pendingWritesRef = useRef({});
+	const writeTimerRef = useRef(null);
+
+	const flushSessionWrites = useCallback(async () => {
+		if (writeTimerRef.current) {
+			clearTimeout(writeTimerRef.current);
+			writeTimerRef.current = null;
+		}
+		const pending = pendingWritesRef.current;
+		pendingWritesRef.current = {};
+
+		const keys = Object.keys(pending);
+		if (keys.length === 0) return true;
+
+		const payload = {};
+		keys.forEach((key) => {
+			// Full-size captures live in memory only; the transcript keeps a thumbnail
+			payload[sessionStorageKey(key)] = stripImagesForStorage(pending[key]);
+		});
+		return persist(payload);
+	}, [persist]);
+
+	const queueSessionWrite = useCallback(
+		(key, messages) => {
+			pendingWritesRef.current[key] = messages;
+			if (writeTimerRef.current) return;
+			writeTimerRef.current = setTimeout(() => {
+				writeTimerRef.current = null;
+				flushSessionWrites();
+			}, 1500);
+		},
+		[flushSessionWrites],
+	);
 
 	// Device privacy states
 	const [showDevicePrivacyPrompt, setShowDevicePrivacyPrompt] = useState(false);
@@ -270,9 +423,14 @@ export default function App() {
 	const lockedChatKeyRef = useRef(lockedChatKey);
 	const isGeneratingRef = useRef(isGenerating);
 
-	// Sync references inside an effect to satisfy React lints (no ref updates during render)
+	// Sync references inside an effect to satisfy React lints (no ref updates during render).
+	//
+	// activeTabIdRef is deliberately NOT synced here. It is the agent's target tab, written by
+	// the code that actually retargets (trackAgentTab, open_tab, switch_to_tab, use_current_tab,
+	// share). Mirroring it from state made this effect race those writers: any unrelated render
+	// — a saveMessageLog during the agent loop is enough — would reset the ref to the previous
+	// tab, so the next tool acted on the wrong page.
 	useEffect(() => {
-		activeTabIdRef.current = activeTabId;
 		activeUrlRef.current = activeUrl;
 		activeTabTitleRef.current = activeTabTitle;
 		activeDomainRef.current = activeDomain;
@@ -341,7 +499,7 @@ export default function App() {
 					const modelIds = data.data.map(m => m.id);
 					if (modelIds.length > 0) {
 						setFetchedModels(modelIds);
-						chrome.storage.local.set({ fetchedModels: modelIds });
+						persist({ fetchedModels: modelIds });
 					}
 				}
 			} else {
@@ -433,7 +591,7 @@ export default function App() {
 					const modelIds = data.data.map(m => m.id);
 					if (modelIds.length > 0) {
 						setFetchedModels(modelIds);
-						chrome.storage.local.set({ fetchedModels: modelIds });
+						persist({ fetchedModels: modelIds });
 					}
 				}
 			}
@@ -483,207 +641,284 @@ export default function App() {
 	}
 
 	// Read settings from storage
-	function loadSettings() {
-		chrome.storage.local.get(["apiKey", "endpoint", "model", "systemPrompt", "temperature", "maxTokens", "chats", "chatMetadata", "enableThinking", "reasoningEffort", "maxIterations", "activeSessionKey", "theme", "showToolCallsDetail", "enabledTools", "fetchedModels"], (result) => {
-			if (result.enabledTools) {
-				setEnabledTools(result.enabledTools);
-			}
-			setApiKey(result.apiKey || "");
-			setEndpoint(result.endpoint || "https://api.deepseek.com");
-			setModel(result.model || "deepseek-v4-flash");
-			if (result.fetchedModels && Array.isArray(result.fetchedModels)) {
-				setFetchedModels(result.fetchedModels);
-			}
+	async function loadSettings() {
+		let result;
+		try {
+			result = await getStorage(["apiKey", "endpoint", "model", "systemPrompt", "temperature", "maxTokens", "chatMetadata", "enableThinking", "reasoningEffort", "maxIterations", "activeSessionKey", "theme", "showToolCallsDetail", "enabledTools", "fetchedModels", "supportsImages", "agentGroupId"]);
+		} catch (err) {
+			console.error("Failed to read settings from storage:", err.message);
+			setStorageError(err.message);
+			return;
+		}
 
-			let currentPrompt = result.systemPrompt;
-			const oldDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH.";
-			const newDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, navigate, audit page diagnostics, and inject secure custom JavaScript in the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH. Whenever the user requests setup instructions, scripting guidance, or troubleshooting steps that depend on their host operating system or hardware parameters, you MUST call the \"get_device_details\" tool first to identify their system details and provide a highly targeted response tailored to their active platform.";
+		refreshStorageUsage();
 
-			if (currentPrompt === oldDefaultPrompt || !currentPrompt) {
-				currentPrompt = newDefaultPrompt;
-				chrome.storage.local.set({ systemPrompt: newDefaultPrompt });
-			}
-			setSystemPrompt(currentPrompt);
-			if (result.activeSessionKey) {
-				setActiveSessionKey(result.activeSessionKey);
-			}
-			if (result.theme) {
-				setTheme(result.theme);
-			}
-			setTemperature(result.temperature !== undefined ? parseFloat(result.temperature) : 0.2);
-			setMaxTokens(result.maxTokens !== undefined ? parseInt(result.maxTokens) : 2048);
-			setEnableThinking(result.enableThinking !== undefined ? result.enableThinking : true);
-			setReasoningEffort(result.reasoningEffort || "medium");
-			setShowToolCallsDetail(result.showToolCallsDetail !== undefined ? result.showToolCallsDetail : false);
-
-			const loadedChats = result.chats || {};
-			let loadedMeta = result.chatMetadata || {};
-
-			// Sync migration: check if chats keys exist in loadedMeta or if website scopes lack a URL
-			let changed = false;
-			Object.keys(loadedChats).forEach((key) => {
-				if (loadedChats[key] && loadedChats[key].length > 0) {
-					const isMissingMeta = !loadedMeta[key];
-					const isWebsiteScopeLackingUrl = loadedMeta[key] && loadedMeta[key].scope === "website" && !loadedMeta[key].url;
-
-					if (isMissingMeta || isWebsiteScopeLackingUrl) {
-						changed = true;
-						let scope;
-						let domain = "none";
-						let url = "";
-						let title;
-
-						if (key === "global_chat_history") {
-							scope = "global";
-							title = "Global Chat";
-						} else if (key.startsWith("domain_chat_history_")) {
-							scope = "domain";
-							domain = key.substring("domain_chat_history_".length);
-							title = `Domain: ${domain}`;
-						} else {
-							scope = "website";
-							title = "Website Chat";
-						}
-
-						const messages = loadedChats[key];
-
-						// Try to extract the webpage URL from system context or links in prior messages
-						for (const m of messages) {
-							if (m.role === "system" && m.content) {
-								const textMatch = m.content.match(/extracted from the webpage "[^"]*" \((https?:\/\/[^\s)]+)\)/);
-								if (textMatch) {
-									url = textMatch[1];
-									break;
-								}
-							}
-							if (m.content && m.content.includes("https://")) {
-								const linkMatch = m.content.match(/(https?:\/\/[^\s"']+)/);
-								if (linkMatch) {
-									url = linkMatch[1];
-									break;
-								}
-							}
-						}
-
-						const firstUserMsg = messages.find((m) => m.role === "user")?.content || "";
-						const currentTitle = loadedMeta[key]?.title || (firstUserMsg ? firstUserMsg.substring(0, 47) + (firstUserMsg.length > 47 ? "..." : "") : title);
-
-						loadedMeta[key] = {
-							...(loadedMeta[key] || {}),
-							key,
-							scope,
-							domain,
-							url,
-							title: currentTitle,
-							timestamp: loadedMeta[key]?.timestamp || Date.now(),
-						};
-					}
-				}
-			});
-
-			if (changed) {
-				chrome.storage.local.set({ chatMetadata: loadedMeta });
-			}
-
-			setChats((prevChats) => {
-				const merged = { ...loadedChats };
-				Object.keys(prevChats).forEach((key) => {
-					if (prevChats[key] && prevChats[key].length > (merged[key]?.length || 0)) {
-						merged[key] = prevChats[key];
-					}
-				});
-				return merged;
-			});
-			setChatMetadata(loadedMeta);
-			setApiKeyMissing(!result.apiKey);
-			setMaxIterations(result.maxIterations !== undefined ? parseInt(result.maxIterations) : 50);
-		});
-	}
-
-	// Check active tab properties
-	function trackActiveTab() {
-		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-			if (tabs && tabs[0]) {
-				const tab = tabs[0];
-				setActiveTabId(tab.id);
-
-				// URL change detection logic
-				const newUrl = tab.url || "";
-				const cleanNewUrl = newUrl.split("#")[0];
-
-				// Initialize approved URL ref on first active tab tracking
-				if (approvedChatUrlsRef.current.size === 0 && cleanNewUrl) {
-					approvedChatUrlsRef.current.add(cleanNewUrl);
-				}
-
-				if (cleanNewUrl && approvedChatUrlsRef.current.size > 0 && !approvedChatUrlsRef.current.has(cleanNewUrl)) {
-					const isChromeSystemPage = cleanNewUrl.startsWith("chrome://") || cleanNewUrl.startsWith("chrome-extension://") || cleanNewUrl.startsWith("about:") || cleanNewUrl.startsWith("devtools://") || cleanNewUrl.includes("chromewebstore.google.com");
-
-					if (!isChromeSystemPage) {
-						if (aiIsChangingUrlRef.current) {
-							// AI changed it, so approve the new URL and reset active warnings
-							aiIsChangingUrlRef.current = false;
-							approvedChatUrlsRef.current.add(cleanNewUrl);
-							setShowUrlChangeWarning(false);
-						} else {
-							// Human changed it! Show the warning popup
-							setShowUrlChangeWarning(true);
-						}
-					} else {
-						setShowUrlChangeWarning(false);
-					}
-				} else {
-					// URL matches approved URL (e.g. human switched back to original tab), dismiss warning
-					setShowUrlChangeWarning(false);
-				}
-
-				// Update verified URL ref
-				lastVerifiedUrlRef.current = newUrl;
-
-				setActiveUrl(newUrl);
-				setActiveFavicon(tab.favIconUrl || "icons/icon16.png");
-				setActiveTabTitle(tab.title || "");
-
-				let domain = "none";
-				try {
-					if (tab.url) {
-						const urlObj = new URL(tab.url);
-						domain = urlObj.hostname;
-					}
-				} catch {
-					domain = "restricted";
-				}
-				setActiveDomain(domain);
-
-				const url = tab.url || "";
-				const isChromeSystemPage = url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("about:") || url.startsWith("devtools://") || url.includes("chromewebstore.google.com");
-
-				if (isChromeSystemPage) {
-					setIsConnected(false);
-					setOfflineReason("Chrome restricts content scripts on chrome://, chrome-extension://, developer tools, and Chrome Web Store pages for security. Try a standard website (e.g. speechmatics.com).");
-					return;
-				}
-
-				chrome.tabs.sendMessage(tab.id, { action: "PING" }, (response) => {
-					if (chrome.runtime.lastError || !response || !response.success) {
-						setIsConnected(false);
-						const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : "No response";
-						if (err.includes("Could not establish connection") || err.includes("Receiving end does not exist")) {
-							setOfflineReason("Script not loaded yet. If you just installed/reloaded the extension or opened a new tab, please refresh this browser tab to activate automation.");
-						} else {
-							setOfflineReason(`Connection failed: ${err}. Please refresh the tab or navigate to another page.`);
-						}
-					} else {
-						setIsConnected(true);
-						setOfflineReason("");
-					}
-				});
+		// Reattach to the workspace from before the side panel was closed, but only if that
+		// group still exists — a stale id would silently point every tool at nothing.
+		if (result.agentGroupId) {
+			const stillThere = await getGroupInfo(result.agentGroupId);
+			if (stillThere) {
+				agentGroupIdRef.current = result.agentGroupId;
+				setAgentGroupId(result.agentGroupId);
+				trackAgentTab();
 			} else {
-				setIsConnected(false);
-				setOfflineReason("No active browser tab detected.");
+				persist({ agentGroupId: null });
+			}
+		}
+
+		// Only now is the active workspace known, so it is safe to clear the placeholder tabs
+		// and empty groups an earlier session stranded. Running this any earlier would close
+		// the very group we just reattached to.
+		reconcileStaleWorkspaces(agentGroupIdRef.current)
+			.then((closed) => {
+				if (closed > 0) console.log(`Cleared ${closed} stale agent workspace tab(s).`);
+			})
+			.catch(() => {});
+
+		if (result.enabledTools) {
+			// Merged, not replaced, so tools added in a later version keep their default
+			setEnabledTools((prev) => ({ ...prev, ...result.enabledTools }));
+		}
+		setApiKey(result.apiKey || "");
+		setEndpoint(result.endpoint || "https://api.deepseek.com");
+		setModel(result.model || "deepseek-v4-flash");
+		setSupportsImages(result.supportsImages === true);
+		if (result.fetchedModels && Array.isArray(result.fetchedModels)) {
+			setFetchedModels(result.fetchedModels);
+		}
+
+		let currentPrompt = result.systemPrompt;
+		const oldDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, and navigate the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH.";
+		const newDefaultPrompt = "You are Deepseek Browser Agent, a highly capable AI assistant embedded in a web browser sidebar. You have access to tools that let you read, search, click, scroll, navigate, audit page diagnostics, and inject secure custom JavaScript in the active browser tab. Always be extremely concise, direct, and professional. When answering questions about a webpage or tab content, give direct, straight-to-the-point answers. Do not include unrequested explanations, redundant descriptions of your steps, or generic background info. Keep your answers brief, factual, and focused entirely on the user's specific question. ALWAYS RESPOND IN ENGLISH. Whenever the user requests setup instructions, scripting guidance, or troubleshooting steps that depend on their host operating system or hardware parameters, you MUST call the \"get_device_details\" tool first to identify their system details and provide a highly targeted response tailored to their active platform.";
+
+		if (currentPrompt === oldDefaultPrompt || !currentPrompt) {
+			currentPrompt = newDefaultPrompt;
+			persist({ systemPrompt: newDefaultPrompt });
+		}
+		setSystemPrompt(currentPrompt);
+		if (result.activeSessionKey) {
+			setActiveSessionKey(result.activeSessionKey);
+		}
+		if (result.theme) {
+			setTheme(result.theme);
+		}
+		setTemperature(result.temperature !== undefined ? parseFloat(result.temperature) : 0.2);
+		setMaxTokens(result.maxTokens !== undefined ? parseInt(result.maxTokens) : 2048);
+		setEnableThinking(result.enableThinking !== undefined ? result.enableThinking : true);
+		setReasoningEffort(result.reasoningEffort || "medium");
+		setShowToolCallsDetail(result.showToolCallsDetail !== undefined ? result.showToolCallsDetail : false);
+
+		// Per-session storage keys, migrating the legacy monolithic "chats" object if present
+		let loadedChats = {};
+		try {
+			loadedChats = await loadAllChats();
+		} catch (err) {
+			console.error("Failed to load chat history:", err.message);
+			setStorageError(err.message);
+		}
+		let loadedMeta = result.chatMetadata || {};
+
+		// Sync migration: check if chats keys exist in loadedMeta or if website scopes lack a URL
+		let changed = false;
+		Object.keys(loadedChats).forEach((key) => {
+			if (loadedChats[key] && loadedChats[key].length > 0) {
+				const isMissingMeta = !loadedMeta[key];
+				const isWebsiteScopeLackingUrl = loadedMeta[key] && loadedMeta[key].scope === "website" && !loadedMeta[key].url;
+
+				if (isMissingMeta || isWebsiteScopeLackingUrl) {
+					changed = true;
+					let scope;
+					let domain = "none";
+					let url = "";
+					let title;
+
+					if (key === "global_chat_history") {
+						scope = "global";
+						title = "Global Chat";
+					} else if (key.startsWith("domain_chat_history_")) {
+						scope = "domain";
+						domain = key.substring("domain_chat_history_".length);
+						title = `Domain: ${domain}`;
+					} else {
+						scope = "website";
+						title = "Website Chat";
+					}
+
+					const messages = loadedChats[key];
+
+					// Try to extract the webpage URL from system context or links in prior messages
+					for (const m of messages) {
+						if (m.role === "system" && m.content) {
+							const textMatch = m.content.match(/extracted from the webpage "[^"]*" \((https?:\/\/[^\s)]+)\)/);
+							if (textMatch) {
+								url = textMatch[1];
+								break;
+							}
+						}
+						if (m.content && m.content.includes("https://")) {
+							const linkMatch = m.content.match(/(https?:\/\/[^\s"']+)/);
+							if (linkMatch) {
+								url = linkMatch[1];
+								break;
+							}
+						}
+					}
+
+					const firstUserMsg = messages.find((m) => m.role === "user")?.content || "";
+					const currentTitle = loadedMeta[key]?.title || (firstUserMsg ? firstUserMsg.substring(0, 47) + (firstUserMsg.length > 47 ? "..." : "") : title);
+
+					loadedMeta[key] = {
+						...(loadedMeta[key] || {}),
+						key,
+						scope,
+						domain,
+						url,
+						title: currentTitle,
+						timestamp: loadedMeta[key]?.timestamp || Date.now(),
+					};
+				}
 			}
 		});
+
+		if (changed) {
+			persist({ chatMetadata: loadedMeta });
+		}
+
+		setChats((prevChats) => {
+			const merged = { ...loadedChats };
+			Object.keys(prevChats).forEach((key) => {
+				if (prevChats[key] && prevChats[key].length > (merged[key]?.length || 0)) {
+					merged[key] = prevChats[key];
+				}
+			});
+			return merged;
+		});
+		setChatMetadata(loadedMeta);
+		setApiKeyMissing(!result.apiKey);
+		setMaxIterations(result.maxIterations !== undefined ? parseInt(result.maxIterations) : 50);
 	}
+
+	// Persisted so closing and reopening the side panel reattaches to the same workspace
+	// instead of orphaning it and grouping a second set of tabs.
+	const setAgentGroup = useCallback(
+		(groupId) => {
+			agentGroupIdRef.current = groupId;
+			setAgentGroupId(groupId);
+			persist({ agentGroupId: groupId });
+		},
+		[persist],
+	);
+
+	// Resolves the agent's TARGET tab from its tab group.
+	//
+	// The activeTabId / activeUrl / activeDomain / activeTabTitle state below describes the tab
+	// the AGENT is pointed at, never the tab the user happens to be looking at. Tabs outside the
+	// group are invisible here and to every tool.
+	const trackAgentTab = useCallback(async () => {
+		const groupId = agentGroupIdRef.current;
+
+		if (!groupId) {
+			groupTabsRef.current = [];
+			setGroupTabs([]);
+			setActiveTabId(null);
+			setActiveUrl("");
+			setActiveTabTitle("");
+			setActiveDomain("no workspace");
+			setActiveFavicon("icons/icon16.png");
+			setIsConnected(false);
+			return;
+		}
+
+		const info = await getGroupInfo(groupId);
+		if (!info) {
+			// The user closed or dissolved the group; forget the stale id
+			setAgentGroup(null);
+			setGroupTabs([]);
+			setActiveTabId(null);
+			setActiveDomain("no workspace");
+			setIsConnected(false);
+			return;
+		}
+
+		const tabs = await getGroupTabs(groupId);
+		groupTabsRef.current = tabs;
+		setGroupTabs(tabs.map((t) => ({ id: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl })));
+
+		if (tabs.length === 0) {
+			setActiveTabId(null);
+			setActiveUrl("");
+			setActiveTabTitle("");
+			setActiveDomain("workspace empty");
+			setActiveFavicon("icons/icon16.png");
+			setIsConnected(false);
+			return;
+		}
+
+		const tab = tabs.find((t) => t.id === activeTabIdRef.current) || tabs[0];
+
+		// Refs are written directly as well as through state: a message sent in the same tick
+		// as the workspace being created would otherwise be told there are no tabs.
+		activeTabIdRef.current = tab.id;
+		activeUrlRef.current = tab.url || "";
+		activeTabTitleRef.current = tab.title || "";
+		setActiveTabId(tab.id);
+		setActiveUrl(tab.url || "");
+		setActiveFavicon(tab.favIconUrl || "icons/icon16.png");
+		setActiveTabTitle(tab.title || "");
+
+		let domain = "none";
+		try {
+			if (tab.url) {
+				domain = new URL(tab.url).hostname;
+			}
+		} catch {
+			domain = "restricted";
+		}
+		setActiveDomain(isWorkspacePlaceholder(tab.url) ? "agent workspace" : domain || "workspace");
+
+		const url = tab.url || "";
+		const isChromeSystemPage = url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("about:") || url.startsWith("devtools://") || url.includes("chromewebstore.google.com");
+
+		if (isChromeSystemPage) {
+			setIsConnected(false);
+			return;
+		}
+
+		chrome.tabs.sendMessage(tab.id, { action: "PING" }, (response) => {
+			// Purely informational now. A target tab without a content script is a normal resting
+			// state, not something the user has to fix, so nothing is surfaced as a warning.
+			setIsConnected(!chrome.runtime.lastError && !!response?.success);
+		});
+	}, [setAgentGroup]);
+
+	// Records which tab the user is currently on. Title and URL only, and only the active tab —
+	// never the rest of their browsing. Disclosure to the model is gated on the use_current_tab
+	// tool being enabled, so one switch controls both awareness and access.
+	const trackUserActiveTab = useCallback(async () => {
+		try {
+			const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+			userActiveTabRef.current = tab?.id
+				? {
+						id: tab.id,
+						title: tab.title || "",
+						url: tab.url || "",
+						groupId: tab.groupId,
+					}
+				: null;
+		} catch {
+			userActiveTabRef.current = null;
+		}
+	}, []);
+
+	// Creates the workspace on demand and points the agent at it.
+	const ensureAgentWorkspace = useCallback(async () => {
+		const { groupId, tabId } = await ensureGroup(agentGroupIdRef.current);
+		setAgentGroup(groupId);
+		activeTabIdRef.current = tabId;
+		setActiveTabId(tabId);
+		await trackAgentTab();
+		return { groupId, tabId };
+	}, [trackAgentTab, setAgentGroup]);
 
 	// Sync scroll on new messages
 	useEffect(() => {
@@ -693,7 +928,7 @@ export default function App() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [chats, streamingResponse, streamingThinking, isGenerating]);
 
-	// (loadSettings and trackActiveTab are hoisted above the useEffect)
+	// (loadSettings and trackAgentTab are hoisted above the useEffect)
 
 	// Get active chat key based on scope (memoized to prevent dependency changes)
 	const getChatKey = useCallback(() => {
@@ -723,11 +958,15 @@ export default function App() {
 	};
 
 
-	// Save changes to storage
-	const saveConfiguration = () => {
+	// Save changes to storage. A failed write must never be reported as a success, so this
+	// awaits the checked wrapper and keeps the drawer open with the real reason on failure.
+	const saveConfiguration = async () => {
 		const trimmedKey = apiKey.trim();
-		chrome.storage.local.set(
-			{
+		setIsSaving(true);
+		setSaveError(null);
+
+		try {
+			await setStorage({
 				apiKey: trimmedKey,
 				endpoint: endpoint.trim(),
 				model: model,
@@ -740,16 +979,142 @@ export default function App() {
 				showToolCallsDetail: showToolCallsDetail,
 				enabledTools: enabledTools,
 				fetchedModels: fetchedModels,
-			},
-			() => {
-				setApiKeyMissing(!trimmedKey);
-				setSaveSuccess(true);
-				setTimeout(() => {
-					setSaveSuccess(false);
-					setShowSettings(false);
-				}, 1200);
-			},
-		);
+				supportsImages: supportsImages,
+			});
+		} catch (err) {
+			setIsSaving(false);
+			setStorageError(err.message);
+			if (err.isQuota) {
+				storageBlockedRef.current = true;
+				setStorageBlocked(true);
+				setSaveError("Browser storage is full — settings were NOT saved. Free up space in the Sessions tab, then save again.");
+			} else {
+				setSaveError(`Settings were NOT saved: ${err.message}`);
+			}
+			refreshStorageUsage();
+			return;
+		}
+
+		setIsSaving(false);
+		setApiKeyMissing(!trimmedKey);
+		setStorageError(null);
+		if (storageBlockedRef.current) {
+			storageBlockedRef.current = false;
+			setStorageBlocked(false);
+		}
+		refreshStorageUsage();
+		// The drawer stays open. Closing it on save hides whether the write landed,
+		// which is exactly the failure this whole storage pass exists to surface.
+		setSaveSuccess(true);
+		setTimeout(() => setSaveSuccess(false), 2200);
+	};
+
+	// Deletes whole sessions to recover quota. Used by the "storage full" recovery banner.
+	const purgeSessions = async (sessionKeys) => {
+		if (!sessionKeys || sessionKeys.length === 0) return false;
+
+		try {
+			await removeStorage(sessionKeys.map(sessionStorageKey));
+		} catch (err) {
+			setStorageError(err.message);
+			return false;
+		}
+
+		const nextChats = { ...chatsRef.current };
+		const nextMeta = { ...chatMetadata };
+		sessionKeys.forEach((key) => {
+			delete nextChats[key];
+			delete nextMeta[key];
+		});
+		setChats(nextChats);
+		setChatMetadata(nextMeta);
+
+		const ok = await persist({ chatMetadata: nextMeta });
+		await refreshStorageUsage();
+		return ok;
+	};
+
+	// Largest sessions first — what the recovery banner offers to delete.
+	const heaviestSessions = () => {
+		return Object.values(chatMetadata)
+			.map((meta) => ({
+				...meta,
+				bytes: estimateSessionBytes(chats[meta.key]),
+			}))
+			.filter((s) => s.bytes > 0)
+			.sort((a, b) => b.bytes - a.bytes);
+	};
+
+	// Suggests the heaviest sessions and deletes only what the user confirms.
+	const handleFreeUpSpace = async () => {
+		const candidates = heaviestSessions()
+			.filter((s) => s.key !== getChatKey())
+			.slice(0, 3);
+
+		if (candidates.length === 0) {
+			window.alert("No other saved sessions to delete. Open the Sessions tab to review the current conversation.");
+			return;
+		}
+
+		const freed = candidates.reduce((sum, s) => sum + s.bytes, 0);
+		const list = candidates.map((s) => `  - ${s.title} (${formatBytes(s.bytes)})`).join("\n");
+
+		if (!window.confirm(`Delete these ${candidates.length} largest saved sessions and free about ${formatBytes(freed)}?\n\n${list}\n\nThis cannot be undone.`)) {
+			return;
+		}
+
+		await purgeSessions(candidates.map((s) => s.key));
+	};
+
+	// Opt-in, per session. Tool results are stored in full by default so a transcript replays
+	// exactly what the model saw; this trades that fidelity for space on a session the user
+	// picks. Nothing is ever compacted automatically.
+	const TOOL_PREVIEW_CHARS = 4000;
+
+	const handleCompactSession = async (sessionKey, e) => {
+		if (e) e.stopPropagation();
+
+		const messages = chats[sessionKey];
+		if (!messages || messages.length === 0) return;
+
+		const before = estimateSessionBytes(messages);
+		const compacted = messages.map((m) => {
+			if (m.thumbnails && m.thumbnails.length > 0) {
+				const { thumbnails, ...rest } = m;
+				return { ...rest, thumbnailsDropped: thumbnails.length, compacted: true };
+			}
+			if (m.role !== "tool" || !m.content || m.content.length <= TOOL_PREVIEW_CHARS) return m;
+			return {
+				...m,
+				content: `${m.content.slice(0, TOOL_PREVIEW_CHARS)}\n…[compacted, ${m.content.length - TOOL_PREVIEW_CHARS} characters removed]`,
+				compacted: true,
+			};
+		});
+
+		const after = estimateSessionBytes(compacted);
+		if (after >= before) {
+			window.alert("Nothing to compact in this session — no oversized tool results.");
+			return;
+		}
+
+		if (!window.confirm(`Compact this session and free about ${formatBytes(before - after)}?\n\nLong tool results are shortened to a preview. Your messages and the assistant's replies are untouched. This cannot be undone.`)) {
+			return;
+		}
+
+		const ok = await persist({ [sessionStorageKey(sessionKey)]: compacted });
+		if (ok) {
+			setChats((prev) => ({ ...prev, [sessionKey]: compacted }));
+			await refreshStorageUsage();
+		}
+	};
+
+	// Byte size per session, for the session list and the recovery banner.
+	const sessionSizes = () => {
+		const sizes = {};
+		Object.keys(chats).forEach((key) => {
+			sizes[key] = estimateSessionBytes(chats[key]);
+		});
+		return sizes;
 	};
 
 	// Helper to estimate total context tokens accumulated for the active session
@@ -797,7 +1162,7 @@ export default function App() {
 				...prevChats,
 				[key]: newMessages,
 			};
-			chrome.storage.local.set({ chats: updatedChats });
+			queueSessionWrite(key, newMessages);
 			return updatedChats;
 		});
 
@@ -817,7 +1182,7 @@ export default function App() {
 					hasAiTitle: existing?.hasAiTitle || false,
 				},
 			};
-			chrome.storage.local.set({ chatMetadata: updatedMeta });
+			persist({ chatMetadata: updatedMeta });
 
 			// Auto generate AI title after 2 user messages (deepseek-v4-flash only)
 			const userMsgs = newMessages.filter((m) => m.role === "user");
@@ -829,77 +1194,146 @@ export default function App() {
 		});
 	}
 
-	// Starts a fresh conversation / session for the current scope (global-only persistent chats)
-	const handleNewChat = () => {
+	// Starts a fresh conversation. One tab group per chat session, so the previous group's real
+	// pages are handed back to the user — ungrouped, still open, no longer visible to the agent.
+	const handleNewChat = async () => {
+		const previousGroupId = agentGroupIdRef.current;
+
 		const newKey = generateSessionKey();
 		setActiveSessionKey(newKey);
-		chrome.storage.local.set({ activeSessionKey: newKey });
+		persist({ activeSessionKey: newKey });
 
-		// Prevent logging tab change when switching/creating a new chat
-		lastLoggedUrlRef.current = activeUrl;
-		lastLoggedTabIdRef.current = activeTabId;
-		lastVerifiedUrlRef.current = activeUrl;
-		approvedChatUrlsRef.current = new Set(activeUrl ? [activeUrl.split("#")[0]] : []);
+		// An unused workspace is already exactly what a new chat wants. Tearing it down only to
+		// build an identical one leaves a stray placeholder tab and a second group in the strip.
+		if (previousGroupId && (await isGroupPristine(previousGroupId))) {
+			const tabs = await getGroupTabs(previousGroupId);
+			activeTabIdRef.current = tabs[0]?.id || null;
+			setActiveTabId(tabs[0]?.id || null);
+			await trackAgentTab();
+			return;
+		}
+
+		setAgentGroup(null);
+		activeTabIdRef.current = null;
+		setActiveTabId(null);
+
+		if (previousGroupId) {
+			await releaseGroup(previousGroupId);
+		}
+
+		// A fresh chat gets its workspace immediately, so the group is visible in the tab strip
+		// from the start rather than appearing partway through the first answer.
+		try {
+			await ensureAgentWorkspace();
+		} catch (err) {
+			console.warn("Could not open the agent workspace:", err.message);
+			await trackAgentTab();
+		}
 	};
 
 	// Theme toggle action
 	const handleToggleTheme = () => {
 		const nextTheme = theme === "dark" ? "light" : "dark";
 		setTheme(nextTheme);
-		chrome.storage.local.set({ theme: nextTheme });
+		persist({ theme: nextTheme });
 	};
 
-	// Handles loading a saved session
-	const handleLoadSession = (session) => {
+	// Handles loading a saved session. Switching chats switches workspaces: the current group's
+	// tabs are released back to the user and the loaded session starts without one. The agent
+	// creates a fresh group on its next action.
+	const handleLoadSession = async (session) => {
+		const previousGroupId = agentGroupIdRef.current;
+
 		setActiveSessionKey(session.key);
-		chrome.storage.local.set({ activeSessionKey: session.key });
+		persist({ activeSessionKey: session.key });
 		setShowSettings(false);
 
 		setCurrentScope("global");
 
-		// Prevent logging tab change when switching/creating a new chat
-		lastLoggedUrlRef.current = activeUrl;
-		lastLoggedTabIdRef.current = activeTabId;
-		lastVerifiedUrlRef.current = session.url || activeUrl;
-		const sessionUrl = session.url || activeUrl;
-		approvedChatUrlsRef.current = new Set(sessionUrl ? [sessionUrl.split("#")[0]] : []);
+		// An unused workspace carries no state worth releasing — keep it for the loaded session
+		if (previousGroupId && (await isGroupPristine(previousGroupId))) {
+			await trackAgentTab();
+			return;
+		}
 
-		if (session.url && session.url !== "none" && session.url !== "") {
-			const cleanSessionUrl = session.url.split("#")[0];
-			const cleanActiveUrl = activeUrl.split("#")[0];
-			if (cleanSessionUrl !== cleanActiveUrl) {
-				chrome.tabs.query({}, (tabs) => {
-					const existingTab = tabs.find((t) => t.url && t.url.split("#")[0] === cleanSessionUrl);
-					if (existingTab) {
-						chrome.tabs.update(existingTab.id, { active: true });
-						if (existingTab.windowId) {
-							chrome.windows.update(existingTab.windowId, { focused: true });
-						}
-					} else {
-						chrome.tabs.create({ url: session.url });
-					}
-				});
+		setAgentGroup(null);
+		activeTabIdRef.current = null;
+		setActiveTabId(null);
+
+		if (previousGroupId) {
+			await releaseGroup(previousGroupId);
+		}
+		await trackAgentTab();
+	};
+
+	// Shares a specific tab with the agent, creating the group around it if there is none.
+	const shareTabWithAgent = useCallback(
+		async (tabId) => {
+			const groupId = await ensureGroupWithTab(agentGroupIdRef.current, tabId);
+			setAgentGroup(groupId);
+			activeTabIdRef.current = tabId;
+			setActiveTabId(tabId);
+			await trackAgentTab();
+			return groupId;
+		},
+		[trackAgentTab, setAgentGroup],
+	);
+
+	// Phrases that mean "work on the page I am looking at" rather than "go find something".
+	const CURRENT_TAB_HINT = /\b(?:this|current|the)\s+(?:page|tab|site|website|url|article|screen|form|document)\b|\bon\s+(?:this|the)\s+page\b|\bhere\s+on\b|\bwhat(?:'s| is)\s+on\s+(?:this|the)\b/i;
+
+	const isRestrictedUrl = (url) =>
+		!url || url.startsWith("chrome://") || url.startsWith("chrome-extension://") || url.startsWith("about:") || url.startsWith("devtools://") || url.includes("chromewebstore.google.com");
+
+	// Decides what the agent's workspace should contain before a message is sent. If the user is
+	// clearly talking about the page in front of them, that tab is pulled into the group and the
+	// placeholder blank tab is cleaned up. Otherwise the agent just gets its blank workspace.
+	const prepareWorkspaceForMessage = async (text) => {
+		try {
+			const groupId = agentGroupIdRef.current;
+			const info = groupId ? await getGroupInfo(groupId) : null;
+			const tabs = info ? await getGroupTabs(groupId) : [];
+			const hasRealPage = tabs.some((t) => !isRestrictedUrl(t.url));
+
+			// Same switch as the tool: with it off, the tab the user is on stays private
+			const canUseCurrentTab = enabledTools.use_current_tab !== false;
+
+			if (canUseCurrentTab && !hasRealPage && CURRENT_TAB_HINT.test(text)) {
+				const [userTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+				if (userTab?.id && !isRestrictedUrl(userTab.url)) {
+					const newGroupId = await shareTabWithAgent(userTab.id);
+					await pruneBlankTabs(newGroupId, userTab.id);
+					await trackAgentTab();
+					return;
+				}
 			}
+
+			if (!info) {
+				await ensureAgentWorkspace();
+			}
+		} catch (err) {
+			console.warn("Could not prepare the agent workspace:", err.message);
+		}
+	};
+
+	// Header action: hand the user's current foreground tab to the agent. The programmatic twin
+	// of dragging it into the group.
+	const handleShareCurrentTab = async () => {
+		const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+		if (!tab || !tab.id) return;
+
+		try {
+			await shareTabWithAgent(tab.id);
+		} catch (err) {
+			console.error("Failed to share tab with the agent:", err.message);
 		}
 	};
 
 	// Handles deleting a saved session
-	const handleDeleteSession = (sessionKey, e) => {
+	const handleDeleteSession = async (sessionKey, e) => {
 		e.stopPropagation();
-		if (window.confirm("Are you sure you want to delete this saved session?")) {
-			setChats((prevChats) => {
-				const updatedChats = { ...prevChats };
-				delete updatedChats[sessionKey];
-				chrome.storage.local.set({ chats: updatedChats });
-				return updatedChats;
-			});
-			setChatMetadata((prevMeta) => {
-				const updatedMeta = { ...prevMeta };
-				delete updatedMeta[sessionKey];
-				chrome.storage.local.set({ chatMetadata: updatedMeta });
-				return updatedMeta;
-			});
-		}
+		if (!window.confirm("Are you sure you want to delete this saved session?")) return;
+		await purgeSessions([sessionKey]);
 	};
 
 	// Uses deepseek-v4-flash only to generate a clean title after 2 user messages
@@ -948,7 +1382,7 @@ export default function App() {
 								hasAiTitle: true,
 							},
 						};
-						chrome.storage.local.set({ chatMetadata: updated });
+						persist({ chatMetadata: updated });
 						return updated;
 					});
 				}
@@ -978,7 +1412,7 @@ export default function App() {
 					title: editingTitleText.trim(),
 				},
 			};
-			chrome.storage.local.set({ chatMetadata: updated });
+			persist({ chatMetadata: updated });
 			return updated;
 		});
 		setEditingSessionKey(null);
@@ -1076,6 +1510,48 @@ END OF DEBUG COMPILATION
 
 	// (scrollToBottom is hoisted above the useEffect)
 
+	// --- User image attachments -------------------------------------------------------------
+	// Only reachable when the model has been declared image-capable; a text-only endpoint would
+	// reject the multipart content outright.
+
+	const addFiles = useCallback(
+		async (files) => {
+			const images = Array.from(files || []).filter((f) => f.type?.startsWith("image/"));
+			if (images.length === 0) return;
+
+			setAttachError("");
+			const room = MAX_IMAGES_PER_REQUEST - attachments.length;
+			if (room <= 0) {
+				setAttachError(`Up to ${MAX_IMAGES_PER_REQUEST} images per message.`);
+				return;
+			}
+			if (images.length > room) {
+				setAttachError(`Only the first ${room} added — ${MAX_IMAGES_PER_REQUEST} images per message.`);
+			}
+
+			for (const file of images.slice(0, room)) {
+				try {
+					const built = await fileToAttachment(file);
+					setAttachments((prev) => [...prev, { id: `${file.name}-${prev.length}-${file.size}`, ...built }]);
+				} catch (err) {
+					setAttachError(err.message);
+				}
+			}
+		},
+		[attachments.length],
+	);
+
+	const removeAttachment = (id) => setAttachments((prev) => prev.filter((a) => a.id !== id));
+
+	const handleComposerPaste = (e) => {
+		if (!supportsImages) return;
+		const files = Array.from(e.clipboardData?.files || []);
+		if (files.some((f) => f.type?.startsWith("image/"))) {
+			e.preventDefault();
+			addFiles(files);
+		}
+	};
+
 	// Auto-expand input box
 	const handleInputChange = (e) => {
 		setInputMessage(e.target.value);
@@ -1110,12 +1586,10 @@ END OF DEBUG COMPILATION
 	const handleSubmitMessage = async (e) => {
 		e.preventDefault();
 		const text = inputMessage.trim();
-		if (!text) return;
-
-		// Approve the current URL since the user is continuing the chat on this page
-		if (activeUrl) {
-			approvedChatUrlsRef.current.add(activeUrl.split("#")[0]);
-		}
+		const pending = supportsImages ? attachments : [];
+		// An image on its own is a valid message
+		if (!text && pending.length === 0) return;
+		if (storageBlockedRef.current) return;
 
 		if (isGenerating) {
 			// Enqueue intermediate user comment
@@ -1138,25 +1612,90 @@ END OF DEBUG COMPILATION
 			inputRef.current.style.height = "auto";
 		}
 
-		const updated = addLocalMessage("user", text);
+		setAttachments([]);
+		setAttachError("");
+
+		const updated = addLocalMessage(
+			"user",
+			text,
+			pending.length > 0
+				? {
+						userUploaded: true,
+						images: pending.map((a) => a.dataUrl),
+						thumbnails: pending.map((a) => a.thumbnail),
+						imageMeta: pending.map((a) => a.meta),
+					}
+				: {},
+		);
 
 		if (!apiKey) {
 			addLocalMessage("assistant", "⚠️ **Deepseek API Key is missing!** Open configurations (gear icon) to save your credentials.");
 			return;
 		}
 
+		await prepareWorkspaceForMessage(text);
 		await executeDeepSeekCall(null, null, updated);
+	};
+
+	// Transient upstream failures — gateway capacity, rate limits, bad gateways. These say
+	// "retry shortly" and mean it; without this a single hiccup ends the whole agent run and the
+	// user loses the turn along with everything the tools already did.
+	const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+	const MAX_REQUEST_RETRIES = 3;
+
+	const postChatCompletion = async (url, init, onRetry) => {
+		let lastError = null;
+
+		for (let attempt = 0; attempt <= MAX_REQUEST_RETRIES; attempt++) {
+			if (stopRequestedRef.current) throw lastError || new Error("Stopped by user.");
+
+			let response;
+			try {
+				response = await fetch(url, init);
+			} catch (err) {
+				// Network-level failure: worth one more go
+				lastError = err;
+				if (attempt === MAX_REQUEST_RETRIES) throw err;
+				await waitBeforeRetry(attempt, null, onRetry, err.message);
+				continue;
+			}
+
+			if (response.ok || !RETRYABLE_STATUSES.has(response.status)) return response;
+
+			const detail = await response.text();
+			lastError = new Error(`API Response Error (${response.status}): ${detail}`);
+			if (attempt === MAX_REQUEST_RETRIES) throw lastError;
+
+			await waitBeforeRetry(attempt, response.headers.get("retry-after"), onRetry, `${response.status}`);
+		}
+
+		throw lastError || new Error("Request failed.");
+	};
+
+	const waitBeforeRetry = async (attempt, retryAfterHeader, onRetry, reason) => {
+		// Honour Retry-After when the server sends one, else exponential backoff with jitter
+		const headerSeconds = Number.parseFloat(retryAfterHeader);
+		const backoff = Number.isFinite(headerSeconds) && headerSeconds > 0 ? headerSeconds * 1000 : 2 ** attempt * 1000 + Math.random() * 400;
+
+		if (onRetry) onRetry(attempt + 1, Math.round(backoff / 100) / 10, reason);
+		await new Promise((resolve) => setTimeout(resolve, Math.min(backoff, 15000)));
 	};
 
 	// Executes DeepSeek V4 agent loop
 	async function executeDeepSeekCall(extraSystemContext = null, overrideUserPrompt = null, currentMessagesState = null) {
+		// Chats are paused while storage is full: continuing would spend API credit on turns
+		// that cannot be saved.
+		if (storageBlockedRef.current) {
+			return;
+		}
+
 		// Lock the chat key so navigation mid-flight doesn't switch or vanish the chat history
 		setLockedChatKey(getChatKey());
 
 		// Race condition safeguard: resolve active API key directly from storage if state is not updated yet
 		let activeApiKey = apiKeyRef.current;
 		if (!activeApiKey) {
-			const storageResult = await new Promise((resolve) => chrome.storage.local.get("apiKey", resolve));
+			const storageResult = await getStorage("apiKey").catch(() => ({}));
 			activeApiKey = storageResult.apiKey || "";
 		}
 
@@ -1308,7 +1847,7 @@ END OF DEBUG COMPILATION
 				type: "function",
 				function: {
 					name: "list_open_tabs",
-					description: "List all currently open tabs in the browser, including their IDs, URLs, and titles.",
+					description: `List the tabs shared with you. You can only see and act on tabs inside the "${AGENT_GROUP_TITLE}" tab group; every other tab in the browser is private to the user. Returns IDs, URLs, and titles, and marks which tab you are currently targeting.`,
 					parameters: { type: "object", properties: {} },
 				},
 			},
@@ -1316,13 +1855,13 @@ END OF DEBUG COMPILATION
 				type: "function",
 				function: {
 					name: "switch_to_tab",
-					description: "Switch the active browser tab to the tab with the specified Tab ID.",
+					description: "Point yourself at a different tab inside your tab group. This changes which tab your page tools act on; it does NOT bring the tab to the foreground, so the user is never interrupted. Only tabs in your group can be targeted.",
 					parameters: {
 						type: "object",
 						properties: {
 							tabId: {
 								type: "number",
-								description: "The numeric ID of the tab to activate.",
+								description: "The numeric ID of a tab inside your tab group.",
 							},
 						},
 						required: ["tabId"],
@@ -1332,9 +1871,43 @@ END OF DEBUG COMPILATION
 			{
 				type: "function",
 				function: {
-					name: "url_changing",
-					description: "Notify the system that you are about to trigger a URL change or tab switch (via navigation, link clicking, or tab switching) so the user is not warned about an unexpected human-initiated navigation.",
+					name: "open_tab",
+					description: "Open a URL in a NEW background tab inside your tab group, and target it. Prefer this over navigate_to when you want to keep the current page as well.",
+					parameters: {
+						type: "object",
+						properties: {
+							url: {
+								type: "string",
+								description: "The absolute URL to open",
+							},
+						},
+						required: ["url"],
+					},
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "use_current_tab",
+					description: "Move the tab the user is currently looking at into your tab group and target it. Use this whenever the user asks you to do something with 'this page', 'this tab', or the page they are on. You are told which tab that is in the system context, but you cannot read or act on it until you call this.",
 					parameters: { type: "object", properties: {} },
+				},
+			},
+			{
+				type: "function",
+				function: {
+					name: "close_tab",
+					description: "Close a tab inside your tab group when you no longer need it. Only tabs in your group can be closed.",
+					parameters: {
+						type: "object",
+						properties: {
+							tabId: {
+								type: "number",
+								description: "The numeric ID of a tab inside your tab group.",
+							},
+						},
+						required: ["tabId"],
+					},
 				},
 			},
 			{
@@ -1370,6 +1943,36 @@ END OF DEBUG COMPILATION
 					parameters: { type: "object", properties: {} },
 				},
 			},
+			// Vision tools exist only when the user has declared the model image-capable
+			...(supportsImages
+				? [
+						{
+							type: "function",
+							function: {
+								name: "take_screenshot",
+								description: "Capture what is currently visible in your target tab as an image. Use this when the page's layout, rendering, or visual state matters and the DOM text is not enough. The image is attached to the conversation right after this call.",
+								parameters: { type: "object", properties: {} },
+							},
+						},
+						{
+							type: "function",
+							function: {
+								name: "screenshot_element",
+								description: "Capture a single element of your target tab as an image, scrolling it into view first. Cheaper and sharper than a full screenshot when you only care about one component.",
+								parameters: {
+									type: "object",
+									properties: {
+										selector: {
+											type: "string",
+											description: "CSS selector of the element to capture",
+										},
+									},
+									required: ["selector"],
+								},
+							},
+						},
+					]
+				: []),
 		];
 
 		try {
@@ -1383,20 +1986,68 @@ END OF DEBUG COMPILATION
 					break;
 				}
 
+				if (storageBlockedRef.current) {
+					saveMessageLog([
+						...activeMessages,
+						{ role: "system", content: "Agent paused: browser storage is full. Nothing after this point was saved." },
+					]);
+					break;
+				}
+
 				// Compile messages payload mapped exactly to OpenAI/Deepseek specifications
 				let payloadMessages = [{ role: "system", content: systemPrompt }];
 
-				// Inject active tab context (current Tab ID, URL, and Title) so the AI always knows its active page
-				const tabContextStr = `[CURRENT TAB ID: ${activeTabIdRef.current}]\n[CURRENT TAB URL: ${activeUrlRef.current}]\n[CURRENT TAB TITLE: ${activeTabTitleRef.current}]`;
+				// Tell the model what it is pointed at, and that its reach stops at the group
+				const onPlaceholder = isWorkspacePlaceholder(activeUrlRef.current);
+
+				// Awareness of the user's current tab is disclosed only when use_current_tab is
+				// enabled, so a single switch governs both seeing it and being able to take it.
+				const canUseCurrentTab = enabledTools.use_current_tab !== false;
+				const userTab = userActiveTabRef.current;
+				let userTabLine = "";
+				if (canUseCurrentTab && userTab && userTab.groupId !== agentGroupIdRef.current) {
+					userTabLine = isRestrictedUrl(userTab.url)
+						? `\n[USER IS CURRENTLY ON: a restricted Chrome page, which cannot be automated]`
+						: `\n[USER IS CURRENTLY ON: "${userTab.title}" — ${userTab.url}. This tab is NOT yours yet: you cannot read or act on it. If the user asks you to work on "this page" or "this tab", call use_current_tab to move it into your group first.]`;
+				}
+
+				const tabContextStr = `[WORKSPACE: you operate only inside the "${AGENT_GROUP_TITLE}" Chrome tab group. You cannot read or act on any tab outside it. The user shares a tab by dragging it into the group.]\n[TABS SHARED WITH YOU: ${groupTabsRef.current.length}]\n[CURRENT TAB ID: ${activeTabIdRef.current}]\n[CURRENT TAB URL: ${activeUrlRef.current}]\n[CURRENT TAB TITLE: ${activeTabTitleRef.current}]${onPlaceholder ? "\n[NOTE: your current tab is the empty workspace placeholder. It has no content to read. Use open_tab or navigate_to to load a real page before using any page tool.]" : ""}${userTabLine}`;
 				payloadMessages.push({ role: "system", content: tabContextStr });
 
 				if (extraSystemContext) {
 					payloadMessages.push({ role: "system", content: extraSystemContext });
 				}
 
+				// Vision is expensive, so only the most recent captures are actually sent
+				const imageIndexes = [];
+				activeMessages.forEach((m, idx) => {
+					if (m.images && m.images.length > 0) imageIndexes.push(idx);
+				});
+				const allowedImageIndexes = new Set(imageIndexes.slice(-MAX_IMAGES_PER_REQUEST));
+
 				// Add history mapping reasoning_content and tool_calls context seamlessly in full (no truncation)
-				activeMessages.forEach((m) => {
-					if (m.role === "user") {
+				activeMessages.forEach((m, idx) => {
+					// The agent's own screenshots. Stored under their own role so the UI never
+					// mistakes them for something the user said, but encoded as a user message here
+					// because that is the only shape a vision API accepts an image in.
+					if (isToolImageMessage(m) || (m.role === "user" && m.userUploaded)) {
+						const hasImages = m.images && m.images.length > 0;
+
+						if (hasImages && supportsImages && allowedImageIndexes.has(idx)) {
+							payloadMessages.push({
+								role: "user",
+								content: [
+									{ type: "text", text: m.content || (m.userUploaded ? "" : "Screenshot") },
+									...m.images.map((url) => ({ type: "image_url", image_url: { url } })),
+								],
+							});
+						} else {
+							payloadMessages.push({
+								role: "user",
+								content: `${m.content || (m.userUploaded ? "[image]" : "Screenshot")} (image not attached — ${supportsImages ? "older image dropped to save tokens" : "image support is off"})`,
+							});
+						}
+					} else if (m.role === "user") {
 						payloadMessages.push({ role: "user", content: m.content });
 					} else if (m.role === "assistant") {
 						const msgObj = { role: "assistant", content: m.content || "" };
@@ -1421,8 +2072,12 @@ END OF DEBUG COMPILATION
 					payloadMessages.push({ role: "user", content: overrideUserPrompt });
 				}
 
-				// V4 supports both thinking and tools at the same time
-				const attachTools = isConnected;
+				// V4 supports both thinking and tools at the same time.
+				// Tools are attached whenever any are enabled, not gated on a live content-script
+				// connection: with no workspace yet the agent's first tool call creates the group
+				// and opens a page. Connectivity is resolved per call instead.
+				const activeTools = agentTools.filter((t) => enabledTools[t.function.name] !== false);
+				const attachTools = activeTools.length > 0;
 
 				const requestPayload = {
 					model: model,
@@ -1439,21 +2094,25 @@ END OF DEBUG COMPILATION
 				}
 
 				if (attachTools) {
-					const activeTools = agentTools.filter((t) => t.function.name === "url_changing" || enabledTools[t.function.name] !== false);
-					if (activeTools.length > 0) {
-						requestPayload.tools = activeTools;
-						requestPayload.tool_choice = "auto";
-					}
+					requestPayload.tools = activeTools;
+					requestPayload.tool_choice = "auto";
 				}
 
-				const response = await fetch(`${endpoint}/chat/completions`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${activeApiKey}`,
+				const response = await postChatCompletion(
+					`${endpoint}/chat/completions`,
+					{
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+							Authorization: `Bearer ${activeApiKey}`,
+						},
+						body: JSON.stringify(requestPayload),
 					},
-					body: JSON.stringify(requestPayload),
-				});
+					(attempt, seconds, reason) => {
+						setRetryNotice(`Upstream busy (${reason}). Retrying in ${seconds}s — attempt ${attempt} of ${MAX_REQUEST_RETRIES}.`);
+					},
+				);
+				setRetryNotice("");
 
 				if (!response.ok) {
 					const errorText = await response.text();
@@ -1476,6 +2135,11 @@ END OF DEBUG COMPILATION
 							toolCalls: message.tool_calls,
 						});
 
+						// Captured images ride along as user messages, but every tool result must
+						// follow its assistant tool_calls message without anything in between,
+						// so they are held back until the whole batch has been answered.
+						const pendingImageMessages = [];
+
 						for (const toolCall of message.tool_calls) {
 							const toolName = toolCall.function.name;
 							const args = JSON.parse(toolCall.function.arguments || "{}");
@@ -1494,6 +2158,24 @@ END OF DEBUG COMPILATION
 								actionResult = { success: false, error: err.message };
 							}
 
+							// Vision APIs only accept images on a user message, so this is encoded as
+							// one at request time — but it is the agent's own output, not something
+							// the user said, so it is stored under its own role and rendered as a
+							// tool result. Full-size data stays in memory.
+							const capturedImage = actionResult?.__image;
+							const capturedThumb = actionResult?.__thumbnail;
+							const capturedCaption = actionResult?.__caption;
+							const capturedSource = actionResult?.__source;
+							const capturedMeta = actionResult?.__meta;
+							if (capturedImage) {
+								actionResult = { ...actionResult };
+								delete actionResult.__image;
+								delete actionResult.__thumbnail;
+								delete actionResult.__caption;
+								delete actionResult.__source;
+								delete actionResult.__meta;
+							}
+
 							nextMessages.push({
 								role: "tool",
 								toolCallId: callId,
@@ -1501,10 +2183,27 @@ END OF DEBUG COMPILATION
 								content: JSON.stringify(actionResult),
 							});
 
+							if (capturedImage) {
+								pendingImageMessages.push({
+									role: "tool_image",
+									toolName: toolName,
+									content: capturedCaption || "Screenshot",
+									source: capturedSource || "",
+									images: [capturedImage],
+									thumbnails: capturedThumb ? [capturedThumb] : [],
+									imageMeta: capturedMeta ? [capturedMeta] : [],
+								});
+							}
+
 							nextMessages.push({
 								role: "system",
 								content: `Completed tool: ${toolName}`,
 							});
+							saveMessageLog(nextMessages);
+						}
+
+						if (pendingImageMessages.length > 0) {
+							nextMessages.push(...pendingImageMessages);
 							saveMessageLog(nextMessages);
 						}
 
@@ -1619,11 +2318,10 @@ END OF DEBUG COMPILATION
 			];
 			saveMessageLog(finalMessages);
 		} finally {
+			setRetryNotice("");
+			await flushSessionWrites();
 			setIsGenerating(false);
 			setLockedChatKey(null);
-			if (activeUrl) {
-				approvedChatUrlsRef.current.add(activeUrl.split("#")[0]);
-			}
 		}
 	}
 
@@ -1631,34 +2329,40 @@ END OF DEBUG COMPILATION
 	async function triggerQuickAction(action, text = "", overrideTabId = null, overrideUrl = null) {
 		if (isGeneratingRef.current) return;
 
-		// Resolve target tab and URL (safeguard against stale/uninitialized activeTabId/activeUrl)
-		let targetTabId = overrideTabId || activeTabIdRef.current;
-		let targetUrl = overrideUrl || activeUrlRef.current;
+		// A quick action (or a context-menu item) is an explicit "act on this page" gesture, so
+		// the tab the user is pointing at is shared with the agent rather than refused.
+		let targetTabId = overrideTabId;
+		if (!targetTabId) {
+			const [userTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+			targetTabId = userTab?.id || activeTabIdRef.current;
+		}
 
 		if (!targetTabId) {
-			const tabs = await new Promise((resolve) => {
-				chrome.tabs.query({ active: true, currentWindow: true }, resolve);
-			});
-			if (tabs && tabs[0]) {
-				targetTabId = tabs[0].id;
-				targetUrl = tabs[0].url || targetUrl;
-				setActiveTabId(targetTabId);
-				setActiveUrl(targetUrl);
+			addLocalMessage("assistant", "⚠️ **No page to work on.** Open a webpage first, then try again.");
+			return;
+		}
 
-				// Update refs immediately to avoid state delay
-				activeTabIdRef.current = targetTabId;
-				activeUrlRef.current = targetUrl;
-				activeTabTitleRef.current = tabs[0].title || "";
-			}
-		} else {
-			activeTabIdRef.current = targetTabId;
-			activeUrlRef.current = targetUrl;
+		try {
+			await shareTabWithAgent(targetTabId);
+		} catch (err) {
+			addLocalMessage("assistant", `❌ **Could not share this tab with the agent:** ${err.message}`);
+			return;
+		}
+
+		try {
+			const tab = await chrome.tabs.get(targetTabId);
+			activeUrlRef.current = tab.url || overrideUrl || "";
+			activeTabTitleRef.current = tab.title || "";
+			setActiveUrl(activeUrlRef.current);
+			setActiveTabTitle(activeTabTitleRef.current);
+		} catch {
+			activeUrlRef.current = overrideUrl || activeUrlRef.current;
 		}
 
 		// Race condition safeguard: if apiKey state is empty, fetch it directly from storage first
 		let currentApiKey = apiKeyRef.current;
 		if (!currentApiKey) {
-			const result = await new Promise((resolve) => chrome.storage.local.get("apiKey", resolve));
+			const result = await getStorage("apiKey").catch(() => ({}));
 			currentApiKey = result.apiKey || "";
 			if (currentApiKey) {
 				setApiKey(currentApiKey);
@@ -1743,18 +2447,68 @@ END OF DEBUG COMPILATION
 
 	// Load configuration and observe tabs
 	useEffect(() => {
-		loadSettings();
-		trackActiveTab();
+		// Deferred so the initial state writes land outside the effect body
+		const bootTimer = setTimeout(() => {
+			loadSettings();
+			trackAgentTab();
+			trackUserActiveTab();
+		}, 0);
 
-		const tabActiveHandler = () => trackActiveTab();
-		const tabUpdateHandler = (_tabId, changeInfo) => {
-			if (changeInfo.status === "complete") {
-				trackActiveTab();
-			}
+		// Only changes inside the agent's own group are interesting. The user switching between
+		// their own tabs is deliberately invisible here.
+		let refreshTimer = null;
+		const refresh = () => {
+			if (refreshTimer) return;
+			refreshTimer = setTimeout(() => {
+				refreshTimer = null;
+				trackAgentTab();
+			}, 150);
 		};
 
-		chrome.tabs.onActivated.addListener(tabActiveHandler);
+		// Cheap, write-nothing listeners that just keep note of the user's current tab
+		const userTabHandler = () => trackUserActiveTab();
+
+		const tabUpdateHandler = (_tabId, changeInfo, tab) => {
+			if (tab?.active) trackUserActiveTab();
+			if (!agentGroupIdRef.current) return;
+			// changeInfo.groupId is the direct signal that a tab joined or left a group, which
+			// is exactly how the user grants and revokes access
+			if (changeInfo.groupId !== undefined) {
+				refresh();
+				return;
+			}
+			if (tab && tab.groupId !== agentGroupIdRef.current) return;
+			if (changeInfo.status === "complete" || changeInfo.title || changeInfo.favIconUrl) {
+				refresh();
+			}
+		};
+		// Belt and braces: dragging a tab into a group also reorders the strip
+		const tabMovedHandler = () => {
+			if (agentGroupIdRef.current) refresh();
+		};
+		const tabRemovedHandler = (tabId) => {
+			if (!agentGroupIdRef.current) return;
+			if (tabId === activeTabIdRef.current) {
+				activeTabIdRef.current = null;
+			}
+			refresh();
+		};
+		const groupRemovedHandler = (group) => {
+			if (group.id !== agentGroupIdRef.current) return;
+			setAgentGroup(null);
+			activeTabIdRef.current = null;
+			refresh();
+		};
+
+		chrome.tabs.onActivated.addListener(userTabHandler);
+		chrome.windows.onFocusChanged.addListener(userTabHandler);
 		chrome.tabs.onUpdated.addListener(tabUpdateHandler);
+		chrome.tabs.onMoved.addListener(tabMovedHandler);
+		chrome.tabs.onAttached.addListener(tabMovedHandler);
+		chrome.tabs.onDetached.addListener(tabMovedHandler);
+		chrome.tabs.onRemoved.addListener(tabRemovedHandler);
+		chrome.tabGroups?.onRemoved.addListener(groupRemovedHandler);
+		chrome.tabGroups?.onUpdated.addListener(tabMovedHandler);
 
 		const messageHandler = (message) => {
 			if (message.action === "CONTEXT_MENU_SUMMARIZE") {
@@ -1767,10 +2521,20 @@ END OF DEBUG COMPILATION
 		chrome.runtime.onMessage.addListener(messageHandler);
 
 		return () => {
-			chrome.tabs.onActivated.removeListener(tabActiveHandler);
+			clearTimeout(bootTimer);
+			if (refreshTimer) clearTimeout(refreshTimer);
+			chrome.tabs.onActivated.removeListener(userTabHandler);
+			chrome.windows.onFocusChanged.removeListener(userTabHandler);
 			chrome.tabs.onUpdated.removeListener(tabUpdateHandler);
+			chrome.tabs.onMoved.removeListener(tabMovedHandler);
+			chrome.tabs.onAttached.removeListener(tabMovedHandler);
+			chrome.tabs.onDetached.removeListener(tabMovedHandler);
+			chrome.tabs.onRemoved.removeListener(tabRemovedHandler);
+			chrome.tabGroups?.onRemoved.removeListener(groupRemovedHandler);
+			chrome.tabGroups?.onUpdated.removeListener(tabMovedHandler);
 			chrome.runtime.onMessage.removeListener(messageHandler);
 		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	// Delegate copy-code clicks safely to avoid CSP violations (inline event handlers are banned in MV3)
@@ -1804,53 +2568,266 @@ END OF DEBUG COMPILATION
 		};
 	}, []);
 
-	// Refs to track last logged URL and Tab ID to avoid duplicate system log writes
-	const lastLoggedUrlRef = useRef("");
-	const lastLoggedTabIdRef = useRef(null);
+	// captureVisibleTab can only capture the ACTIVE tab of a window, so this is the only tool
+	// that ever surfaces a tab. It restores whatever the user was looking at straight after —
+	// and if the group has been popped into its own window, they see nothing at all.
+	const captureScreenshot = async (groupId, toolName, args) => {
+		const info = await getGroupInfo(groupId);
+		const windowId = info?.windowId;
 
-	// Monitor active webpage/tab changes and log system messages in the chat history
-	useEffect(() => {
-		if (!activeUrl || activeUrl === "loading...") return;
+		let targetTabId = activeTabIdRef.current;
+		if (!targetTabId || !(await isInGroup(groupId, targetTabId))) {
+			const tabs = await getGroupTabs(groupId);
+			if (tabs.length === 0) {
+				return { success: false, error: `The "${AGENT_GROUP_TITLE}" group has no tabs to capture. Use open_tab first.` };
+			}
+			const real = tabs.find((t) => !isWorkspacePlaceholder(t.url));
+			targetTabId = (real || tabs[0]).id;
+			activeTabIdRef.current = targetTabId;
+			setActiveTabId(targetTabId);
+		}
 
-		const previousUrl = lastLoggedUrlRef.current;
-
-		// Update refs immediately
-		lastLoggedUrlRef.current = activeUrl;
-		lastLoggedTabIdRef.current = activeTabId;
-
-		// Do not log on the very first render / startup
-		if (!previousUrl) return;
-
-		const key = getChatKey();
-		setChats((prevChats) => {
-			const currentMessages = prevChats[key] || [];
-			if (currentMessages.length === 0) {
-				return prevChats;
+		let previouslyActiveId = null;
+		try {
+			const [wasActive] = await chrome.tabs.query({ active: true, windowId });
+			if (wasActive && wasActive.id !== targetTabId) {
+				previouslyActiveId = wasActive.id;
+				await chrome.tabs.update(targetTabId, { active: true });
+				await new Promise((r) => setTimeout(r, 250));
 			}
 
-			// Prevent writing duplicate consecutive system change logs for the same URL
-			const lastMsg = currentMessages[currentMessages.length - 1];
-			if (lastMsg?.role === "system" && lastMsg.content.includes(activeUrl)) {
-				return prevChats;
+			// A crop is re-encoded afterwards, so capture it losslessly: JPEG here plus JPEG
+			// again after cropping would compress the same pixels twice.
+			const wantsCrop = toolName === "screenshot_element";
+			const fullDataUrl = await chrome.tabs.captureVisibleTab(windowId, wantsCrop ? { format: "png" } : { format: "jpeg", quality: CAPTURE_QUALITY });
+
+			let image = fullDataUrl;
+			let size = await getImageSize(fullDataUrl);
+
+			if (wantsCrop) {
+				if (!args.selector) {
+					return { success: false, error: "selector is required for screenshot_element." };
+				}
+				const [{ result: rect } = {}] = await chrome.scripting.executeScript({
+					target: { tabId: targetTabId },
+					func: (selector) => {
+						const el = document.querySelector(selector);
+						if (!el) return null;
+						el.scrollIntoView({ block: "center", behavior: "instant" });
+						const r = el.getBoundingClientRect();
+						return { x: r.x, y: r.y, width: r.width, height: r.height, dpr: window.devicePixelRatio || 1 };
+					},
+					args: [args.selector],
+				});
+
+				if (!rect) {
+					return { success: false, error: `No element matched the selector "${args.selector}".` };
+				}
+
+				const cropped = await cropImage(fullDataUrl, rect, rect.dpr);
+				image = cropped.dataUrl;
+				size = { width: cropped.width, height: cropped.height };
 			}
 
-			const newSystemMsg = {
-				role: "system",
-				content: `Active tab changed to: ${activeTabTitle || activeUrl} (URL: ${activeUrl}, Tab ID: ${activeTabId})`,
-				timestamp: Date.now(),
-			};
+			// Hi-DPI displays hand back captures around 2900px wide. Vision models downscale
+			// anything that large anyway, so sending it just inflates the request body and the
+			// resolution-based token bill for no extra detail.
+			image = await downscaleToMaxEdge(image);
+			size = await getImageSize(image);
 
-			const updatedMessages = [...currentMessages, newSystemMsg];
-			const updatedChats = {
-				...prevChats,
-				[key]: updatedMessages,
+			const thumbnail = await makeThumbnail(image);
+			const tab = await chrome.tabs.get(targetTabId);
+
+			return {
+				success: true,
+				message: `Captured ${size.width}x${size.height} of ${tab.url}. The image is attached in the next message.`,
+				__image: image,
+				__thumbnail: thumbnail,
+				__caption: toolName === "screenshot_element" ? `Screenshot of "${args.selector}" on ${tab.url}` : `Screenshot of ${tab.url}`,
+				__source: toolName === "screenshot_element" ? `${args.selector} — ${tab.url}` : tab.url,
+				__meta: { ...size, bytes: dataUrlBytes(image) },
 			};
-			chrome.storage.local.set({ chats: updatedChats });
-			return updatedChats;
-		});
-	}, [activeUrl, activeTabTitle, activeTabId, getChatKey]);
+		} catch (err) {
+			return { success: false, error: err.message };
+		} finally {
+			if (previouslyActiveId) {
+				try {
+					await chrome.tabs.update(previouslyActiveId, { active: true });
+				} catch {
+					// The tab went away while we were capturing
+				}
+			}
+		}
+	};
 
 	const executeContentScriptAction = async (toolName, args) => {
+		// Device details are about the host machine, not a page, so this must not spin up a
+		// workspace the user never asked for.
+		if (toolName === "get_device_details") {
+			return new Promise((resolve) => {
+				devicePrivacyResolveRef.current = resolve;
+				setShareOsAndPlatform(true);
+				setShareHardware(true);
+				setShareNetworkAndLocal(false);
+				setDevicePrivacyTimer(30);
+				setShowDevicePrivacyPrompt(true);
+			});
+		}
+
+		// Every other tool runs inside the agent's tab group, which is created on demand.
+		const { groupId } = await ensureAgentWorkspace();
+
+		// --- Workspace tools: they choose the target rather than acting on a page ----------
+
+		if (toolName === "list_open_tabs") {
+			const tabs = await getGroupTabs(groupId);
+			return {
+				success: true,
+				note: `These are the only tabs shared with you (the "${AGENT_GROUP_TITLE}" tab group). Every other tab in the browser is private to the user and invisible to you.`,
+				tabs: tabs.map((t) => ({
+					id: t.id,
+					url: t.url,
+					title: t.title,
+					isCurrentTarget: t.id === activeTabIdRef.current,
+				})),
+			};
+		}
+
+		if (toolName === "switch_to_tab") {
+			const numericTabId = parseInt(args.tabId);
+			if (isNaN(numericTabId)) {
+				return { success: false, error: "tabId must be a valid number." };
+			}
+			if (!(await isInGroup(groupId, numericTabId))) {
+				return outOfScopeError(numericTabId);
+			}
+
+			// Target selection, not activation. The user's foreground tab is left alone.
+			activeTabIdRef.current = numericTabId;
+			setActiveTabId(numericTabId);
+			await trackAgentTab();
+
+			const tab = await chrome.tabs.get(numericTabId);
+			return {
+				success: true,
+				message: `Now targeting tab ${numericTabId} ("${tab.title}"). It was not brought to the foreground — the user's view is unchanged.`,
+			};
+		}
+
+		if (toolName === "open_tab") {
+			if (!args.url) return { success: false, error: "url is required." };
+			try {
+				const tab = await openInGroup(groupId, args.url);
+				activeTabIdRef.current = tab.id;
+				setActiveTabId(tab.id);
+				await new Promise((r) => setTimeout(r, 1500));
+				await trackAgentTab();
+				return {
+					success: true,
+					tabId: tab.id,
+					message: `Opened ${args.url} in a new background tab inside the agent group and targeted it.`,
+				};
+			} catch (err) {
+				return { success: false, error: err.message };
+			}
+		}
+
+		if (toolName === "use_current_tab") {
+			const [userTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+			if (!userTab?.id) {
+				return { success: false, error: "Could not determine which tab the user is on." };
+			}
+			if (isWorkspacePlaceholder(userTab.url)) {
+				return {
+					success: false,
+					error: "The user is looking at your own workspace placeholder tab, which has no content. Ask them which page they mean, or open one with open_tab.",
+				};
+			}
+			if (isRestrictedUrl(userTab.url)) {
+				return {
+					success: false,
+					error: "The user is on a restricted Chrome page (chrome://, the Web Store, or a settings page). Chrome does not allow automation there. Ask them to switch to a normal website.",
+				};
+			}
+
+			if (userTab.groupId !== groupId) {
+				try {
+					await adoptTab(groupId, userTab.id);
+				} catch (err) {
+					return { success: false, error: err.message };
+				}
+			}
+
+			activeTabIdRef.current = userTab.id;
+			setActiveTabId(userTab.id);
+			await pruneBlankTabs(groupId, userTab.id);
+			await trackAgentTab();
+
+			return {
+				success: true,
+				tabId: userTab.id,
+				url: userTab.url,
+				title: userTab.title,
+				message: `Moved the user's active tab into your group and targeted it: "${userTab.title}". You can now use your page tools on it.`,
+			};
+		}
+
+		if (toolName === "close_tab") {
+			const numericTabId = parseInt(args.tabId);
+			if (isNaN(numericTabId)) {
+				return { success: false, error: "tabId must be a valid number." };
+			}
+			if (!(await isInGroup(groupId, numericTabId))) {
+				return outOfScopeError(numericTabId);
+			}
+			try {
+				await chrome.tabs.remove(numericTabId);
+			} catch (err) {
+				return { success: false, error: err.message };
+			}
+			if (activeTabIdRef.current === numericTabId) {
+				activeTabIdRef.current = null;
+			}
+			await trackAgentTab();
+			return { success: true, message: `Closed tab ${numericTabId}.` };
+		}
+
+		// --- Screenshots: the one operation that needs its tab to be the active one --------
+
+		if (toolName === "take_screenshot" || toolName === "screenshot_element") {
+			if (!supportsImagesRef.current) {
+				return { success: false, error: "Image support is turned off. The user must enable \"Image-capable model\" in settings first." };
+			}
+			return captureScreenshot(groupId, toolName, args);
+		}
+
+		// --- Everything below acts on a page, so resolve a live in-group target tab --------
+
+		let targetTabId = activeTabIdRef.current;
+		if (!targetTabId || !(await isInGroup(groupId, targetTabId))) {
+			const tabs = await getGroupTabs(groupId);
+			if (tabs.length === 0) {
+				return {
+					success: false,
+					error: `The "${AGENT_GROUP_TITLE}" group has no tabs. Use open_tab to open a page, or ask the user to drag a tab into the group.`,
+				};
+			}
+			// Prefer a real page over the workspace placeholder that holds the group open
+			const real = tabs.find((t) => !isWorkspacePlaceholder(t.url));
+			targetTabId = (real || tabs[0]).id;
+			activeTabIdRef.current = targetTabId;
+			setActiveTabId(targetTabId);
+		}
+
+		// The placeholder is an extension page: no content script, nothing to read
+		const targetTab = await chrome.tabs.get(targetTabId).catch(() => null);
+		if (targetTab && isWorkspacePlaceholder(targetTab.url)) {
+			return {
+				success: false,
+				error: "Your only tab is the empty workspace page, which has no content. Use open_tab or navigate_to to load a real page first.",
+			};
+		}
+
 		return new Promise((resolve, reject) => {
 			let payload;
 
@@ -1865,7 +2842,6 @@ END OF DEBUG COMPILATION
 					payload = { action: "QUERY_DOM_ELEMENTS", selector: args.selector };
 					break;
 				case "click_element":
-					aiIsChangingUrlRef.current = true;
 					payload = {
 						action: "CLICK_ELEMENT",
 						selector: args.selector,
@@ -1888,80 +2864,26 @@ END OF DEBUG COMPILATION
 					};
 					break;
 				case "navigate_to":
-					aiIsChangingUrlRef.current = true;
-					chrome.tabs.update(activeTabIdRef.current, { url: args.url }, () => {
-						setTimeout(
-							() =>
-								resolve({
-									success: true,
-									message: `Navigated browser tab to ${args.url}`,
-								}),
-							2000,
-						);
+					chrome.tabs.update(targetTabId, { url: args.url }, () => {
+						if (chrome.runtime.lastError) {
+							resolve({ success: false, error: chrome.runtime.lastError.message });
+							return;
+						}
+						setTimeout(() => {
+							trackAgentTab();
+							resolve({
+								success: true,
+								message: `Navigated tab ${targetTabId} to ${args.url}`,
+							});
+						}, 2000);
 					});
 					return;
 				case "highlight_text":
 					payload = { action: "HIGHLIGHT_TEXT", query: args.query };
 					break;
-				case "list_open_tabs":
-					chrome.tabs.query({}, (tabs) => {
-						const tabDetails = tabs.map((t) => ({
-							id: t.id,
-							url: t.url,
-							title: t.title,
-							active: t.active,
-						}));
-						resolve({ success: true, tabs: tabDetails });
-					});
-					return;
-				case "switch_to_tab": {
-					aiIsChangingUrlRef.current = true;
-					const numericTabId = parseInt(args.tabId);
-					if (isNaN(numericTabId)) {
-						resolve({ success: false, error: "tabId must be a valid number." });
-						return;
-					}
-					chrome.tabs.update(numericTabId, { active: true }, (tab) => {
-						if (chrome.runtime.lastError) {
-							resolve({
-								success: false,
-								error: chrome.runtime.lastError.message,
-							});
-						} else if (tab) {
-							if (tab.windowId) {
-								chrome.windows.update(tab.windowId, { focused: true });
-							}
-							resolve({
-								success: true,
-								message: `Successfully switched to tab ID ${numericTabId} (${tab.title})`,
-							});
-						} else {
-							resolve({
-								success: false,
-								error: `Tab with ID ${numericTabId} not found.`,
-							});
-						}
-					});
-					return;
-				}
-				case "url_changing":
-					aiIsChangingUrlRef.current = true;
-					resolve({
-						success: true,
-						message: "System notified of upcoming URL change.",
-					});
-					return;
-				case "get_device_details":
-					devicePrivacyResolveRef.current = resolve;
-					setShareOsAndPlatform(true);
-					setShareHardware(true);
-					setShareNetworkAndLocal(false);
-					setDevicePrivacyTimer(30);
-					setShowDevicePrivacyPrompt(true);
-					return;
 				case "execute_js_in_page": {
 					chrome.scripting.executeScript({
-						target: { tabId: activeTabIdRef.current },
+						target: { tabId: targetTabId },
 						func: (codeStr) => {
 							try {
 								const fn = new Function(codeStr);
@@ -1983,7 +2905,7 @@ END OF DEBUG COMPILATION
 				}
 				case "get_page_diagnostics": {
 					chrome.scripting.executeScript({
-						target: { tabId: activeTabIdRef.current },
+						target: { tabId: targetTabId },
 						func: () => {
 							try {
 								const performanceData = {};
@@ -2026,7 +2948,7 @@ END OF DEBUG COMPILATION
 					return;
 			}
 
-			chrome.tabs.sendMessage(activeTabIdRef.current, payload, (response) => {
+			chrome.tabs.sendMessage(targetTabId, payload, (response) => {
 				if (chrome.runtime.lastError) {
 					reject(new Error(`Page Control Error: ${chrome.runtime.lastError.message}`));
 				} else {
@@ -2315,7 +3237,7 @@ END OF DEBUG COMPILATION
 <div class="my-2 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-800/80 bg-zinc-50 dark:bg-zinc-950/60 shadow-inner">
   <div class="flex justify-between items-center px-3 py-1.5 bg-zinc-100/80 dark:bg-zinc-900/80 text-[10px] text-zinc-500 dark:text-zinc-400 font-sans border-b border-zinc-200 dark:border-zinc-800 select-none">
     <span>${cleanLang ? cleanLang.toUpperCase() : "CODE"}</span>
-    <button class="copy-code-btn hover:text-zinc-850 dark:hover:text-white transition-colors" data-copy-target="${id}">Copy</button>
+    <button class="copy-code-btn hover:text-zinc-850 dark:hover:text-foreground transition-colors" data-copy-target="${id}">Copy</button>
   </div>
   <pre class="p-2.5 overflow-x-auto"><code id="${id}" class="font-mono text-zinc-700 dark:text-zinc-300 text-xs block leading-relaxed">${highlighted}</code></pre>
 </div>`;
@@ -2494,6 +3416,94 @@ END OF DEBUG COMPILATION
 		return finalHtml;
 	};
 
+	// Images the user attached to their own message. Rendered inside the bubble, and clickable
+	// into the same full-canvas viewer the agent's captures use.
+	const renderAttachments = (msg) => {
+		const previews = msg.images?.length ? msg.images : msg.thumbnails;
+		if (!previews || previews.length === 0) {
+			return msg.imagesStripped ? <div className="mt-1.5 font-mono text-[9px] opacity-60">[{msg.imagesStripped} image{msg.imagesStripped === 1 ? "" : "s"} not kept in history]</div> : null;
+		}
+
+		return (
+			<div className="mt-1.5 flex flex-wrap gap-1.5">
+				{previews.map((src, idx) => (
+					<button
+						key={idx}
+						type="button"
+						onClick={() => setLightbox({ src, alt: `Attached image ${idx + 1}`, meta: msg.imageMeta?.[idx] })}
+						title="Open full size"
+						className="block cursor-zoom-in overflow-hidden rounded-md border border-background/25 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					>
+						<img src={src} alt={`Attached image ${idx + 1}`} className="max-h-32 max-w-[140px] object-cover" />
+					</button>
+				))}
+			</div>
+		);
+	};
+
+	// A screenshot the agent took. Rendered as a tool result, left-aligned and clearly the
+	// agent's own output — it only becomes a "user" message at request time, because that is
+	// the only shape a vision API accepts an image in. Live runs show the full capture; a
+	// reloaded session shows the stored thumbnail, since full-size images are never persisted.
+	const renderToolImage = (msg, key) => {
+		const previews = msg.images?.length ? msg.images : msg.thumbnails;
+		const dropped = msg.imagesStripped || msg.thumbnailsDropped;
+		const label = msg.toolName === "screenshot_element" ? "Element screenshot" : "Screenshot";
+		const source = msg.source || msg.content || "";
+
+		return (
+			<div key={key} className="animate-fade-in flex w-full min-w-0 justify-start">
+				<div className="flex w-full min-w-0 max-w-[88%] flex-col gap-1.5 overflow-hidden rounded-xl rounded-tl-none border border-zinc-800 bg-zinc-950/60 p-2.5 shadow-sm">
+					<div className="flex min-w-0 items-center gap-1.5">
+						<ImageIcon className="h-3 w-3 shrink-0 text-blue-500" />
+						<span className="shrink-0 font-mono text-[9px] font-bold uppercase tracking-wider text-blue-400">{label}</span>
+						{source && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<span className="min-w-0 flex-1 cursor-help truncate font-mono text-[9px] text-zinc-500" title={source}>
+										{source}
+									</span>
+								</TooltipTrigger>
+								<TooltipContent className="custom-tooltip max-w-[280px] break-all rounded-lg border border-zinc-850 bg-[#0e1118] px-2.5 py-1.5 font-mono text-[11px] leading-normal text-zinc-300 shadow-2xl">
+									{source}
+								</TooltipContent>
+							</Tooltip>
+						)}
+					</div>
+
+					{previews && previews.length > 0 ? (
+						previews.map((src, idx) => (
+							<button
+								key={idx}
+								type="button"
+								onClick={() => setLightbox({ src, alt: source || "Agent screenshot", meta: msg.imageMeta?.[0] })}
+								title="Open full size — scroll to zoom, drag to pan"
+								className="group/shot relative block w-full cursor-zoom-in overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+							>
+								<img src={src} alt={source || "Agent screenshot"} className="max-h-56 w-full object-contain transition-transform duration-200 group-hover/shot:scale-[1.015]" />
+								<span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/0 opacity-0 transition-all duration-150 group-hover/shot:bg-background/45 group-hover/shot:opacity-100">
+									<span className="flex items-center gap-1 rounded border border-foreground/25 bg-background/85 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-foreground">
+										<Maximize2 className="h-2.5 w-2.5" /> Expand
+									</span>
+								</span>
+							</button>
+						))
+					) : (
+						<span className="rounded border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-500">
+							{dropped ? `${dropped} image not kept in history` : "Image unavailable"}
+						</span>
+					)}
+
+					{msg.imageMeta?.[0] && (
+						<span className="font-mono text-[9px] text-zinc-500">
+							{msg.imageMeta[0].width}x{msg.imageMeta[0].height} · {formatBytes(msg.imageMeta[0].bytes)}
+						</span>
+					)}
+				</div>
+			</div>
+		);
+	};
+
 	return (
 		<TooltipProvider delayDuration={10}>
 			<div className={`relative flex h-screen w-screen flex-col overflow-hidden bg-background font-sans text-foreground ${theme}`}>
@@ -2510,6 +3520,8 @@ END OF DEBUG COMPILATION
 					setShowToolCallsDetail={setShowToolCallsDetail}
 					setShowSettings={setShowSettings}
 					fetchApiBalance={fetchApiBalance}
+					persistSetting={persist}
+					handleShareCurrentTab={handleShareCurrentTab}
 				/>
 
 				{/* 2. API Key Warning Alert banner */}
@@ -2533,6 +3545,54 @@ END OF DEBUG COMPILATION
 					</div>
 				)}
 
+				{/* 2b. Storage health banner: warn early, pause and offer a way out when full */}
+				{(() => {
+					const ratio = storageUsage?.ratio ?? 0;
+					if (!storageBlocked && !storageError && ratio < WARN_RATIO) return null;
+
+					const isCritical = storageBlocked || !!storageError || ratio >= CRITICAL_RATIO;
+					const tone = isCritical
+						? "border-rose-500/20 bg-rose-500/10 text-rose-300"
+						: "border-amber-500/20 bg-amber-500/10 text-amber-300";
+
+					let message;
+					if (storageBlocked) {
+						message = "Browser storage is full. Chats are paused and nothing is being saved.";
+					} else if (storageError) {
+						message = `Last save failed: ${storageError}`;
+					} else {
+						message = `Storage ${Math.round(ratio * 100)}% full (${formatBytes(storageUsage.bytes)} of ${formatBytes(storageUsage.quota)}).`;
+					}
+
+					return (
+						<div className={`z-20 flex items-center justify-between gap-2 border-b px-3 py-1.5 text-[11px] font-medium ${tone}`}>
+							<div className="flex min-w-0 items-center gap-1.5">
+								<AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${isCritical ? "text-rose-500" : "text-amber-500"}`} />
+								<span className="truncate" title={message}>{message}</span>
+							</div>
+							<div className="flex shrink-0 items-center gap-1.5">
+								<Button
+									size="xs"
+									onClick={handleFreeUpSpace}
+									className={`h-5 rounded px-1.5 text-[10px] font-semibold ${isCritical ? "bg-rose-600 hover:bg-rose-500" : "bg-amber-600 hover:bg-amber-500"} text-accent-on`}
+								>
+									Free up space
+								</Button>
+								{storageBlocked && (
+									<Button
+										size="xs"
+										variant="ghost"
+										onClick={() => flushSessionWrites()}
+										className="h-5 rounded border border-rose-500/30 px-1.5 text-[10px] font-semibold text-rose-200 hover:bg-rose-500/10"
+									>
+										Retry save
+									</Button>
+								)}
+							</div>
+						</div>
+					);
+				})()}
+
 				{/* 3. Chat Messages Scrolling Panel */}
 				<main
 					ref={chatAreaRef}
@@ -2551,7 +3611,16 @@ END OF DEBUG COMPILATION
 							</div>
 
 							<h1 className="mb-0.5 text-base font-bold tracking-tight text-zinc-100">Deepseek Browser Agent</h1>
-							<p className="mb-5 max-w-[85%] text-[11px] leading-relaxed text-zinc-500">Interact, extract, and automate operations on this website using standard Deepseek models.</p>
+							<p className="mb-3 max-w-[85%] text-[11px] leading-relaxed text-zinc-500">Interact, extract, and automate operations on the web using standard Deepseek models.</p>
+
+							{/* Semantic tokens, not raw zinc shades: the light theme only remaps a
+						    whitelist of dark utilities, so a bare bg-zinc-950/50 stays dark. */}
+							<div className="mb-5 flex w-full items-start gap-2 rounded-lg border border-border bg-card p-2.5 text-left">
+								<Layers className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-blue-500" />
+								<p className="text-[11px] leading-relaxed text-muted-foreground">
+									The agent works only inside its own <span className="font-semibold text-foreground">{AGENT_GROUP_TITLE}</span> tab group. Drag a tab into the group to share it; everything outside stays private and untouched.
+								</p>
+							</div>
 
 							<div className="flex w-full flex-col gap-1.5">
 								<span className="pl-1 text-left text-[10px] font-bold uppercase tracking-wider text-zinc-500">Preset Operations</span>
@@ -2592,13 +3661,20 @@ END OF DEBUG COMPILATION
 									let i = 0;
 									while (i < allMsgs.length) {
 										const msg = allMsgs[i];
+										if (isToolImageMessage(msg)) {
+											rendered.push(renderToolImage(msg, `img-${i}`));
+											i++;
+											continue;
+										}
 										if (msg.role === "user") {
 											rendered.push(
-												<div key={`user-${i}`} className="animate-fade-in flex w-full justify-end">
-													<div className="flex max-w-[88%] flex-col gap-0.5">
-														<div className="rounded-xl rounded-tr-none border border-zinc-800 bg-zinc-900 p-2.5 text-xs leading-relaxed text-zinc-100">
+												<div key={`user-${i}`} className="group/msg animate-fade-in flex w-full justify-end">
+													<div className="flex min-w-0 max-w-[88%] flex-col overflow-hidden">
+														<div className="msg-user rounded-xl rounded-tr-none border border-foreground bg-foreground p-2.5 text-xs leading-relaxed text-background">
 															<div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+															{msg.userUploaded && renderAttachments(msg)}
 														</div>
+														<CopyButton getText={() => msg.content} align="end" label="Copy your message" />
 													</div>
 												</div>
 											);
@@ -2652,11 +3728,12 @@ END OF DEBUG COMPILATION
 											// Render the assistant verbal content (if any, omitting thoughts/reasoning)
 											if (msg.content && msg.content.trim() !== "") {
 												rendered.push(
-													<div key={`asst-content-${i}`} className="animate-fade-in flex w-full justify-start">
-														<div className="flex max-w-[88%] flex-col gap-0.5">
+													<div key={`asst-content-${i}`} className="group/msg animate-fade-in flex w-full justify-start">
+														<div className="flex min-w-0 max-w-[88%] flex-col overflow-hidden">
 															<div className="border-zinc-850 rounded-xl rounded-tl-none border bg-zinc-950/60 p-2.5 text-xs leading-relaxed text-zinc-300 shadow-sm">
 																<div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
 															</div>
+															<CopyButton getText={() => msg.content} align="start" label="Copy reply" />
 														</div>
 													</div>
 												);
@@ -2665,11 +3742,18 @@ END OF DEBUG COMPILATION
 											// Aggregated tool calls block starting at this assistant message
 											if (msg.toolCalls && msg.toolCalls.length > 0) {
 												let toolCallCount = 0;
+												// Screenshots taken during this run are hoisted out of the collapsed block —
+												// an image IS the answer, so it stays visible when the step-by-step tool
+												// log is hidden.
+												const capturedImages = [];
 												let j = i;
 												while (j < allMsgs.length) {
 													const m = allMsgs[j];
 													if (m.role === "user" || m.role === "escalation_request") {
 														break;
+													}
+													if (isToolImageMessage(m)) {
+														capturedImages.push({ msg: m, at: j });
 													}
 													if (m.role === "assistant") {
 														// If it's a subsequent assistant message with verbal content, break
@@ -2708,6 +3792,8 @@ END OF DEBUG COMPILATION
 														</div>
 													);
 												}
+												capturedImages.forEach(({ msg: shot, at }) => rendered.push(renderToolImage(shot, `tc-img-${at}`)));
+
 												i = j;
 												continue;
 											}
@@ -2716,6 +3802,10 @@ END OF DEBUG COMPILATION
 									}
 								} else {
 									allMsgs.forEach((msg, index) => {
+										if (isToolImageMessage(msg)) {
+											rendered.push(renderToolImage(msg, `img-${index}`));
+											return;
+										}
 										if (msg.role === "system") {
 											if (msg.content.startsWith("Agent action:") || msg.content.startsWith("Completed tool:") || msg.content.startsWith("Blocked:")) return;
 											rendered.push(
@@ -2752,9 +3842,9 @@ END OF DEBUG COMPILATION
 											return;
 										}
 										rendered.push(
-											<div key={`msg-${index}`} className={`animate-fade-in flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-												<div className="flex max-w-[88%] flex-col gap-0.5">
-													<div className={`rounded-xl text-xs leading-relaxed ${msg.role === "user" ? "rounded-tr-none border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-zinc-100" : "p-2.5 border-zinc-850 rounded-tl-none border bg-zinc-950/60 text-zinc-300 shadow-sm"}`}>
+											<div key={`msg-${index}`} className={`group/msg animate-fade-in flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+												<div className="flex min-w-0 max-w-[88%] flex-col gap-0.5 overflow-hidden">
+													<div className={`rounded-xl text-xs leading-relaxed ${msg.role === "user" ? "msg-user rounded-tr-none border border-foreground bg-foreground px-4 py-2.5 text-background" : "p-2.5 border-zinc-850 rounded-tl-none border bg-zinc-950/60 text-zinc-300 shadow-sm"}`}>
 														{msg.reasoning && (
 															<details className="group mb-2 max-w-full rounded-lg border border-amber-500/20 bg-amber-500/5 overflow-hidden transition-all duration-200">
 																<summary className="flex items-center justify-between px-2.5 py-1.5 bg-amber-500/5 cursor-pointer hover:bg-amber-500/10 transition-colors select-none font-mono text-[9px] font-bold text-amber-500 uppercase tracking-widest list-none">
@@ -2772,6 +3862,7 @@ END OF DEBUG COMPILATION
 															</details>
 														)}
 														{msg.content && <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />}
+														{msg.userUploaded && renderAttachments(msg)}
 														{msg.toolCalls && msg.toolCalls.length > 0 && (
 															<div className="mt-2 flex w-full flex-col gap-2 border-t border-zinc-800/60 pt-2">
 																{msg.toolCalls.map((tc) => {
@@ -2839,6 +3930,7 @@ END OF DEBUG COMPILATION
 															</div>
 														)}
 													</div>
+												<CopyButton getText={() => msg.content || msg.reasoning || ""} align={msg.role === "user" ? "end" : "start"} label={msg.role === "user" ? "Copy your message" : "Copy reply"} />
 												</div>
 											</div>
 										);
@@ -2850,7 +3942,7 @@ END OF DEBUG COMPILATION
 							{/* Queued Comment Bubble */}
 							{queuedComment && (
 								<div className="animate-fade-in flex w-full justify-end">
-									<div className="flex max-w-[88%] flex-col gap-0.5">
+									<div className="flex min-w-0 max-w-[88%] flex-col gap-0.5 overflow-hidden">
 										<div className="rounded-xl rounded-tr-none border border-dashed border-amber-500/40 bg-amber-500/5 p-2.5 text-xs leading-relaxed text-amber-300/80">
 											<div className="mb-1 flex items-center gap-1.5">
 												<MessageSquarePlus className="h-3 w-3 text-amber-500/70" />
@@ -2866,7 +3958,7 @@ END OF DEBUG COMPILATION
 							{/* Streaming Message renderers */}
 							{(streamingThinking || streamingResponse) && (
 								<div className="animate-fade-in flex w-full justify-start">
-									<div className="flex max-w-[88%] flex-col gap-0.5">
+									<div className="flex min-w-0 max-w-[88%] flex-col gap-0.5 overflow-hidden">
 										<div className="border-zinc-850 rounded-xl rounded-tl-none border bg-zinc-950/60 p-2.5 text-zinc-300 shadow-sm">
 											{streamingThinking && showToolCallsDetail && (
 												<div className="mb-2 max-w-full rounded-lg border border-amber-500/20 bg-amber-500/5 p-2.5">
@@ -2876,6 +3968,16 @@ END OF DEBUG COMPILATION
 											)}
 											{streamingResponse && <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(streamingResponse) }} />}
 										</div>
+									</div>
+								</div>
+							)}
+
+							{/* Transient upstream retry — the run has not failed, it is waiting */}
+							{retryNotice && (
+								<div className="animate-fade-in flex w-full justify-center">
+									<div className="flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1 font-mono text-[10px] text-amber-500">
+										<Loader2 className="h-3 w-3 animate-spin" />
+										<span>{retryNotice}</span>
 									</div>
 								</div>
 							)}
@@ -2903,31 +4005,109 @@ END OF DEBUG COMPILATION
 									<span>CONTEXT:</span>
 									<span className="text-blue-500 font-semibold">{estimateContextTokens(getMessages()).toLocaleString()}</span>
 									<span className="text-[8px] opacity-75 font-normal">tokens</span>
+									{supportsImages &&
+										(() => {
+											const attached = getMessages().filter((m) => m.images?.length || m.thumbnails?.length).length;
+											if (attached === 0) return null;
+											const sent = Math.min(attached, MAX_IMAGES_PER_REQUEST);
+											return (
+												<Tooltip>
+													<TooltipTrigger asChild>
+														<span className="ml-1 cursor-help text-amber-500/80">+{sent} img</span>
+													</TooltipTrigger>
+													<TooltipContent className="custom-tooltip max-w-[220px] rounded-lg border border-zinc-850 bg-[#0e1118] px-2.5 py-1.5 text-[11px] leading-normal text-zinc-300 shadow-2xl">
+														<span>
+															{attached} screenshot{attached === 1 ? "" : "s"} in this chat; the {sent} most recent {sent === 1 ? "is" : "are"} sent with each request to limit token cost.
+														</span>
+													</TooltipContent>
+												</Tooltip>
+											);
+										})()}
 								</div>
 
+								{/* Workspace status. Never an error: the agent opens its own pages, so a
+							    target tab without a content script is a normal resting state, not a
+							    fault the user has to fix. */}
 								<div className="flex items-center gap-1.5 text-[10px] font-bold leading-none select-none">
-									<span className={`h-1 w-1 rounded-full ${isConnected ? "animate-pulse bg-blue-600" : "bg-rose-500"}`} />
-									<span className={isConnected ? "text-zinc-500" : "text-rose-400"}>{isConnected ? "AUTOMATION ONLINE" : "AUTOMATION LINK OFFLINE"}</span>
+									<span className={`h-1 w-1 rounded-full ${agentGroupId ? "animate-pulse bg-blue-600" : "bg-zinc-600"}`} />
+									<span className="text-muted-foreground">{agentGroupId ? `WORKSPACE ACTIVE${groupTabs.length ? ` · ${groupTabs.length} TAB${groupTabs.length === 1 ? "" : "S"}` : ""}` : "NO WORKSPACE YET"}</span>
 								</div>
 							</div>
-
-							{!isConnected && offlineReason && (
-								<div className="animate-fade-in mt-1 flex items-start gap-1.5 rounded border border-rose-950/40 bg-rose-950/20 px-2.5 py-2 text-[10px] font-medium leading-normal text-rose-300">
-									<AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-rose-400" />
-									<div className="flex-1">
-										<span>{offlineReason}</span>
-									</div>
-								</div>
-							)}
 						</div>
 
+						{/* Pending attachments, above the input so they never crowd the caret */}
+						{supportsImages && (attachments.length > 0 || attachError) && (
+							<div className="animate-fade-in flex flex-col gap-1.5">
+								{attachments.length > 0 && (
+									<div className="flex flex-wrap gap-1.5">
+										{attachments.map((a) => (
+											<div key={a.id} className="group/att relative h-12 w-12 overflow-hidden rounded-md border border-border bg-card">
+												<img src={a.thumbnail || a.dataUrl} alt={a.name} title={`${a.name} · ${a.meta.width}x${a.meta.height} · ${formatBytes(a.meta.bytes)}`} className="h-full w-full object-cover" />
+												<button
+													type="button"
+													onClick={() => removeAttachment(a.id)}
+													aria-label={`Remove ${a.name}`}
+													className="absolute right-0 top-0 flex h-4 w-4 cursor-pointer items-center justify-center rounded-bl-md border-b border-l border-border bg-background/90 text-foreground/60 opacity-0 transition-opacity hover:text-foreground group-hover/att:opacity-100 focus-visible:opacity-100"
+												>
+													<XIcon className="h-2.5 w-2.5" />
+												</button>
+											</div>
+										))}
+									</div>
+								)}
+								{attachError && <span className="font-mono text-[9px] text-amber-500">{attachError}</span>}
+							</div>
+						)}
+
 						<div className="flex items-end gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-inner transition-all focus-within:!border-blue-600 hover:border-zinc-700/60">
-							<textarea ref={inputRef} rows={1} value={inputMessage} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={isGenerating ? "Type a comment to queue for the agent..." : "Ask a question or request page actions..."} className="max-h-20 flex-1 resize-none border-none bg-transparent py-1 text-xs leading-normal text-zinc-200 placeholder-zinc-600 outline-none" />
+							{supportsImages && (
+								<>
+									<input
+										ref={fileInputRef}
+										type="file"
+										accept="image/*"
+										multiple
+										className="hidden"
+										onChange={(e) => {
+											addFiles(e.target.files);
+											e.target.value = "";
+										}}
+									/>
+									<Tooltip>
+										<TooltipTrigger asChild>
+											<button
+												type="button"
+												onClick={() => fileInputRef.current?.click()}
+												disabled={storageBlocked}
+												aria-label="Attach an image"
+												className="mb-0.5 flex h-6 w-6 flex-shrink-0 cursor-pointer items-center justify-center rounded-md border border-transparent text-zinc-500 transition-colors hover:border-border hover:text-foreground disabled:opacity-40"
+											>
+												<Paperclip className="h-3.5 w-3.5" />
+											</button>
+										</TooltipTrigger>
+										<TooltipContent className="custom-tooltip max-w-[220px] rounded-lg border border-border bg-popover px-2.5 py-1.5 text-[11px] leading-normal text-popover-foreground shadow-2xl">
+											<span>Attach an image (or paste one). Up to {MAX_IMAGES_PER_REQUEST} per message.</span>
+										</TooltipContent>
+									</Tooltip>
+								</>
+							)}
+
+							<textarea
+								ref={inputRef}
+								rows={1}
+								value={inputMessage}
+								onChange={handleInputChange}
+								onKeyDown={handleKeyDown}
+								onPaste={handleComposerPaste}
+								disabled={storageBlocked}
+								placeholder={storageBlocked ? "Storage full — chats paused. Free up space to continue." : isGenerating ? "Type a comment to queue for the agent..." : "Ask a question or request page actions..."}
+								className="max-h-20 flex-1 resize-none border-none bg-transparent py-1 text-xs leading-normal text-zinc-200 placeholder-zinc-600 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+							/>
 
 							{isGenerating && !inputMessage.trim() ? (
 								<Tooltip>
 									<TooltipTrigger asChild>
-										<Button type="button" onClick={handleStopAgent} size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-rose-600 text-white shadow-md hover:bg-rose-500 animate-pulse">
+										<Button type="button" onClick={handleStopAgent} size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-rose-600 text-accent-on shadow-md hover:bg-rose-500 animate-pulse">
 											<Square className="h-3 w-3" />
 										</Button>
 									</TooltipTrigger>
@@ -2938,7 +4118,7 @@ END OF DEBUG COMPILATION
 							) : isGenerating && inputMessage.trim() ? (
 								<Tooltip>
 									<TooltipTrigger asChild>
-										<Button type="submit" size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-amber-600 text-white shadow-md hover:bg-amber-500">
+										<Button type="submit" size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-amber-600 text-accent-on shadow-md hover:bg-amber-500">
 											<MessageSquarePlus className="h-3 w-3" />
 										</Button>
 									</TooltipTrigger>
@@ -2947,57 +4127,13 @@ END OF DEBUG COMPILATION
 									</TooltipContent>
 								</Tooltip>
 							) : (
-								<Button type="submit" disabled={!inputMessage.trim()} size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-blue-600 text-white shadow-md hover:bg-blue-500">
+								<Button type="submit" disabled={(!inputMessage.trim() && attachments.length === 0) || storageBlocked} size="icon-xs" className="flex-shrink-0 cursor-pointer rounded-md bg-blue-600 text-accent-on shadow-md hover:bg-blue-500">
 									<Send className="h-3 w-3" />
 								</Button>
 							)}
 						</div>
 					</form>
 				</footer>
-
-				{/* Dynamic Human URL Change Warning Backdrop Overlay Modal */}
-				{showUrlChangeWarning && (
-					<div className="animate-fade-in absolute inset-0 z-40 flex items-center justify-center bg-background/60 p-4 backdrop-blur-md">
-						<Card className="animate-scale-up flex w-full max-w-[280px] flex-col gap-4 border-zinc-800 bg-zinc-950/90 p-4 shadow-2xl">
-							<CardHeader className="flex flex-col items-center gap-1.5 p-0 text-center">
-								<div className="mb-1 flex h-10 w-10 animate-pulse items-center justify-center rounded-full bg-amber-500/10">
-									<AlertTriangle className="h-5 w-5 text-amber-500" />
-								</div>
-								<CardTitle className="text-xs font-bold tracking-tight text-zinc-200">URL Change Detected</CardTitle>
-								<CardDescription className="text-zinc-450 text-[11px] leading-normal">We noticed you navigated to a new webpage or switched tabs.</CardDescription>
-							</CardHeader>
-
-							<CardContent className="p-0 text-center">
-								<p className="border-zinc-850 rounded-lg border bg-zinc-900/50 p-2.5 text-[11px] leading-normal text-zinc-300">Do you wish to continue in the same chat or start a fresh global session?</p>
-							</CardContent>
-
-							<CardFooter className="flex flex-col gap-2 p-0">
-								<Button
-									onClick={() => {
-										setShowUrlChangeWarning(false);
-										handleNewChat();
-									}}
-									className="w-full cursor-pointer rounded-lg bg-blue-600 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-500"
-								>
-									Start New Chat
-								</Button>
-								<Button
-									variant="ghost"
-									onClick={() => {
-										if (activeUrl) {
-											approvedChatUrlsRef.current.add(activeUrl.split("#")[0]);
-										}
-										setShowUrlChangeWarning(false);
-									}}
-									className="border-zinc-850 w-full rounded-lg border py-2 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
-								>
-									Continue in Current Chat
-								</Button>
-								<div className="text-zinc-550 mt-1 text-center text-[11px] font-medium italic leading-snug">Note: Starting a new chat is highly recommended to keep context clean and get more accurate answers!</div>
-							</CardFooter>
-						</Card>
-					</div>
-				)}
 
 				{/* Device details privacy selection prompt overlay modal */}
 				{showDevicePrivacyPrompt && (
@@ -3062,7 +4198,7 @@ END OF DEBUG COMPILATION
 							<CardFooter className="flex flex-col gap-2 p-0">
 								<Button
 									onClick={() => handleResolveDeviceDetails(shareOsAndPlatform, shareHardware, shareNetworkAndLocal)}
-									className="w-full cursor-pointer rounded-lg bg-blue-600 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-500"
+									className="w-full cursor-pointer rounded-lg bg-blue-600 py-2 text-xs font-bold text-accent-on transition-colors hover:bg-blue-500"
 								>
 									Send Selected Details
 								</Button>
@@ -3081,6 +4217,9 @@ END OF DEBUG COMPILATION
 					</div>
 				)}
 
+
+				{/* Full-canvas screenshot viewer */}
+				{lightbox && <ImageLightbox src={lightbox.src} alt={lightbox.alt} meta={lightbox.meta} onClose={() => setLightbox(null)} />}
 
 				{/* 6. Settings Sidebar Drawer */}
 				<SettingsDialog
@@ -3118,6 +4257,15 @@ END OF DEBUG COMPILATION
 					fetchApiBalance={fetchApiBalance}
 					saveConfiguration={saveConfiguration}
 					saveSuccess={saveSuccess}
+					saveError={saveError}
+					isSaving={isSaving}
+					supportsImages={supportsImages}
+					setSupportsImages={setSupportsImages}
+					storageUsage={storageUsage}
+					storageBlocked={storageBlocked}
+					handleFreeUpSpace={handleFreeUpSpace}
+					handleCompactSession={handleCompactSession}
+					sessionSizes={sessionSizes()}
 					chatMetadata={chatMetadata}
 					editingSessionKey={editingSessionKey}
 					setEditingSessionKey={setEditingSessionKey}

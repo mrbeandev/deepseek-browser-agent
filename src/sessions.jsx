@@ -20,6 +20,19 @@ import {
 	Moon
 } from "lucide-react";
 import "./index.css";
+import {
+	setStorage,
+	getStorage,
+	removeStorage,
+	loadAllChats,
+	sessionStorageKey,
+	estimateSessionBytes,
+	getStorageUsage,
+	formatBytes,
+	WARN_RATIO,
+	CRITICAL_RATIO,
+	CHAT_KEY_PREFIX,
+} from "@/lib/storage";
 
 // Helper to estimate individual message tokens (roughly 4 characters per token)
 function estimateMessageTokens(msg) {
@@ -316,20 +329,31 @@ export function SessionsAnalyzer() {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [isLoading, setIsLoading] = useState(true);
 	const [theme, setTheme] = useState("dark");
+	const [sortBy, setSortBy] = useState("recent"); // 'recent' | 'size'
+	const [storageUsage, setStorageUsage] = useState(null);
+
+	const refreshUsage = () => {
+		getStorageUsage().then(setStorageUsage);
+	};
 
 	const chatAreaRef = useRef(null);
 
 	// Load data function
-	const loadData = () => {
+	const loadData = async () => {
 		setIsLoading(true);
-		chrome.storage.local.get(["chats", "chatMetadata", "theme"], (result) => {
-			setChats(result.chats || {});
+		try {
+			const [loadedChats, result] = await Promise.all([loadAllChats(), getStorage(["chatMetadata", "theme"])]);
+			setChats(loadedChats);
 			setChatMetadata(result.chatMetadata || {});
 			if (result.theme) {
 				setTheme(result.theme);
 			}
+			refreshUsage();
+		} catch (err) {
+			console.error("Failed to load sessions:", err.message);
+		} finally {
 			setIsLoading(false);
-		});
+		}
 	};
 
 	// Force scroll to bottom on new selection
@@ -351,6 +375,7 @@ export function SessionsAnalyzer() {
 			loadData();
 		}, 0);
 		return () => clearTimeout(timer);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	// Storage change reactive listener
@@ -360,32 +385,59 @@ export function SessionsAnalyzer() {
 				if (changes.theme) {
 					setTheme(changes.theme.newValue || "dark");
 				}
-				if (changes.chats || changes.chatMetadata) {
+				const chatChanged = Object.keys(changes).some((key) => key.startsWith(CHAT_KEY_PREFIX));
+				if (chatChanged || changes.chatMetadata) {
 					loadData();
 				}
 			}
 		};
 		chrome.storage.onChanged.addListener(handleStorageChange);
 		return () => chrome.storage.onChanged.removeListener(handleStorageChange);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
-	// Filter metadata list by search
+	// Filter metadata list by search, ordered by recency or by what is costing the most space
 	const filteredSessions = useMemo(() => {
-		const list = Object.values(chatMetadata);
-		if (!searchQuery.trim()) {
-			return list.sort((a, b) => b.timestamp - a.timestamp);
-		}
-		const q = searchQuery.toLowerCase();
-		return list
-			.filter(
+		let list = Object.values(chatMetadata);
+
+		const q = searchQuery.trim().toLowerCase();
+		if (q) {
+			list = list.filter(
 				(s) =>
 					(s.title && s.title.toLowerCase().includes(q)) ||
 					(s.scope && s.scope.toLowerCase().includes(q)) ||
 					(s.domain && s.domain.toLowerCase().includes(q)) ||
 					(s.url && s.url.toLowerCase().includes(q))
-			)
-			.sort((a, b) => b.timestamp - a.timestamp);
-	}, [chatMetadata, searchQuery]);
+			);
+		}
+
+		if (sortBy === "size") {
+			return list.sort((a, b) => estimateSessionBytes(chats[b.key]) - estimateSessionBytes(chats[a.key]));
+		}
+		return list.sort((a, b) => b.timestamp - a.timestamp);
+	}, [chatMetadata, chats, searchQuery, sortBy]);
+
+	// Deletes every saved session in one go — the blunt instrument for a full storage quota.
+	const handleClearAllSessions = async () => {
+		const keys = Object.keys(chatMetadata);
+		if (keys.length === 0) return;
+
+		const total = keys.reduce((sum, key) => sum + estimateSessionBytes(chats[key]), 0);
+		if (!window.confirm(`Delete ALL ${keys.length} saved sessions and free about ${formatBytes(total)}?\n\nThis cannot be undone.`)) {
+			return;
+		}
+
+		try {
+			await removeStorage(keys.map(sessionStorageKey));
+			await setStorage({ chatMetadata: {} });
+			setChats({});
+			setChatMetadata({});
+			setSelectedSessionKey("");
+			refreshUsage();
+		} catch (err) {
+			window.alert(`Failed to clear sessions: ${err.message}`);
+		}
+	};
 
 	// Statistics
 	const stats = useMemo(() => {
@@ -410,34 +462,40 @@ export function SessionsAnalyzer() {
 	}, [chatMetadata, chats]);
 
 	// Delete a specific session
-	const handleDeleteSession = (key, e) => {
+	const handleDeleteSession = async (key, e) => {
 		e.stopPropagation();
 		if (!window.confirm("Are you sure you want to delete this session and its entire history log? This cannot be undone.")) {
 			return;
 		}
 
-		chrome.storage.local.get(["chats", "chatMetadata"], (result) => {
-			const curChats = result.chats || {};
+		try {
+			const result = await getStorage("chatMetadata");
 			const curMeta = result.chatMetadata || {};
-
-			delete curChats[key];
 			delete curMeta[key];
 
-			chrome.storage.local.set({ chats: curChats, chatMetadata: curMeta }, () => {
-				setChats(curChats);
-				setChatMetadata(curMeta);
-				if (selectedSessionKey === key) {
-					setSelectedSessionKey("");
-				}
+			await removeStorage(sessionStorageKey(key));
+			await setStorage({ chatMetadata: curMeta });
+
+			setChats((prev) => {
+				const next = { ...prev };
+				delete next[key];
+				return next;
 			});
-		});
+			setChatMetadata(curMeta);
+			if (selectedSessionKey === key) {
+				setSelectedSessionKey("");
+			}
+			refreshUsage();
+		} catch (err) {
+			window.alert(`Failed to delete session: ${err.message}`);
+		}
 	};
 
 	// Toggle local theme
 	const handleToggleTheme = () => {
 		const nextTheme = theme === "dark" ? "light" : "dark";
 		setTheme(nextTheme);
-		chrome.storage.local.set({ theme: nextTheme });
+		setStorage({ theme: nextTheme }).catch((err) => console.error("Failed to save theme:", err.message));
 	};
 
 	// Scroll to next/previous user message
@@ -558,6 +616,62 @@ export function SessionsAnalyzer() {
 					</div>
 				</div>
 
+				{/* Storage budget: the number that actually decides whether saving works */}
+				{storageUsage && (
+					<div className="flex flex-col gap-1.5 border-b border-border bg-zinc-950/20 px-3 py-2.5 shrink-0">
+						{(() => {
+							const ratio = Math.min(storageUsage.ratio || 0, 1);
+							const pct = Math.round(ratio * 100);
+							const isCritical = ratio >= CRITICAL_RATIO;
+							const isWarn = !isCritical && ratio >= WARN_RATIO;
+							const barColor = isCritical ? "bg-rose-500" : isWarn ? "bg-amber-500" : "bg-blue-600";
+
+							return (
+								<>
+									<div className="flex items-center justify-between">
+										<span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Extension Storage</span>
+										<span className={`font-mono text-[9px] font-bold ${isCritical ? "text-rose-400" : isWarn ? "text-amber-400" : "text-zinc-400"}`}>
+											{formatBytes(storageUsage.bytes)} / {formatBytes(storageUsage.quota)} ({pct}%)
+										</span>
+									</div>
+									<div className="h-1.5 w-full overflow-hidden rounded-full border border-border bg-zinc-950">
+										<div className={`h-full rounded-full transition-all duration-300 ${barColor}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+									</div>
+								</>
+							);
+						})()}
+					</div>
+				)}
+
+				{/* Ordering and bulk cleanup */}
+				<div className="flex items-center justify-between gap-2 border-b border-border bg-zinc-950/20 px-3 py-2 shrink-0">
+					<div className="flex items-center gap-1">
+						{[
+							{ key: "recent", label: "Recent" },
+							{ key: "size", label: "Largest" },
+						].map((opt) => (
+							<button
+								key={opt.key}
+								onClick={() => setSortBy(opt.key)}
+								className={`cursor-pointer rounded border px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${
+									sortBy === opt.key
+										? "border-blue-500/40 bg-blue-500/10 text-blue-400"
+										: "border-border bg-zinc-950/40 text-zinc-500 hover:text-zinc-300"
+								}`}
+							>
+								{opt.label}
+							</button>
+						))}
+					</div>
+					<button
+						onClick={handleClearAllSessions}
+						disabled={stats.sessionsCount === 0}
+						className="cursor-pointer rounded border border-border bg-zinc-950/40 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-zinc-500 transition-colors hover:border-rose-500/40 hover:text-rose-400 disabled:opacity-40"
+					>
+						Clear All
+					</button>
+				</div>
+
 				{/* Search Panel */}
 				<div className="p-3 border-b border-border bg-zinc-950/20 shrink-0">
 					<div className="relative flex items-center">
@@ -593,6 +707,7 @@ export function SessionsAnalyzer() {
 							const msgs = chats[session.key] || [];
 							let sumTokens = 0;
 							msgs.forEach((m) => (sumTokens += estimateMessageTokens(m)));
+							const sessionBytes = estimateSessionBytes(msgs);
 
 							return (
 								<div
@@ -642,6 +757,8 @@ export function SessionsAnalyzer() {
 											<span>{msgs.length} msgs</span>
 											<span>•</span>
 											<span className="font-bold text-zinc-350">{sumTokens.toLocaleString()} tkn</span>
+											<span>•</span>
+											<span className={sessionBytes > 512 * 1024 ? "font-bold text-amber-500/80" : "font-bold text-zinc-350"}>{formatBytes(sessionBytes)}</span>
 										</div>
 									</div>
 								</div>

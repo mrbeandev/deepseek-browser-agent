@@ -14,9 +14,16 @@ import {
 	Compass,
 	AlertTriangle,
 	Cpu,
+	ChevronDown,
+	Image as ImageIcon,
+	Sparkles,
+	Terminal,
+	Save,
+	Database,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { formatBytes, WARN_RATIO, CRITICAL_RATIO } from "@/lib/storage";
 import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
@@ -71,19 +78,28 @@ const AVAILABLE_TOOLS = [
 	},
 	{
 		key: "list_open_tabs",
-		name: "List Open Tabs",
-		desc: "Lists all open browser tabs, URLs, and titles."
+		name: "List Shared Tabs",
+		desc: "Lists the tabs inside the agent's tab group. Tabs outside the group stay private."
 	},
 	{
 		key: "switch_to_tab",
-		name: "Switch Tab Focus",
-		desc: "Activates and focuses another open browser tab."
+		name: "Target Another Shared Tab",
+		desc: "Points the agent at a different tab in its group without bringing it to the foreground."
 	},
 	{
-		key: "url_changing",
-		name: "URL Change Guard",
-		desc: "Suppresses human-tab-switch warnings for active tasks.",
-		required: true
+		key: "open_tab",
+		name: "Open Tab In Group",
+		desc: "Opens a URL as a new background tab inside the agent's tab group."
+	},
+	{
+		key: "close_tab",
+		name: "Close Tab In Group",
+		desc: "Closes a tab inside the agent's tab group when it is no longer needed."
+	},
+	{
+		key: "use_current_tab",
+		name: "Take The Tab You Are On",
+		desc: "Lets the agent see the title and URL of your current tab, and move it into its group when you ask it to work on that page. Turn this off to keep your current tab completely private."
 	},
 	{
 		key: "get_device_details",
@@ -99,8 +115,77 @@ const AVAILABLE_TOOLS = [
 		key: "get_page_diagnostics",
 		name: "Page Diagnostics (Scripting API)",
 		desc: "Diagnoses active tab response times, load times, meta headers, and document health using Chrome's Scripting API."
+	},
+	{
+		key: "take_screenshot",
+		name: "Screenshot Page",
+		desc: "Captures the visible area of the agent's target tab and sends it to the model.",
+		visionOnly: true
+	},
+	{
+		key: "screenshot_element",
+		name: "Screenshot Element",
+		desc: "Captures a single element of the agent's target tab and sends it to the model.",
+		visionOnly: true
 	}
 ];
+
+/**
+ * Explanation lives in a tooltip, not on screen. Settings read as a short list of
+ * labels; the detail is one hover away.
+ */
+const HelpDot = ({ children }) => (
+	<Tooltip>
+		<TooltipTrigger asChild>
+			<span
+				role="button"
+				tabIndex={0}
+				onClick={(e) => {
+					e.preventDefault();
+					e.stopPropagation();
+				}}
+				className="inline-flex h-3.5 w-3.5 shrink-0 cursor-help select-none items-center justify-center rounded-full border border-border font-mono text-[8px] font-bold leading-none text-muted-foreground transition-colors hover:border-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+			>
+				?
+			</span>
+		</TooltipTrigger>
+		<TooltipContent className="custom-tooltip max-w-[220px] rounded-lg border border-border bg-popover px-2.5 py-1.5 text-[11px] leading-normal text-popover-foreground shadow-2xl">
+			{children}
+		</TooltipContent>
+	</Tooltip>
+);
+
+const FieldLabel = ({ children, help, className = "" }) => (
+	<div className={`flex items-center gap-1.5 ${className}`}>
+		<label className="text-[11px] font-bold text-zinc-400">{children}</label>
+		{help && <HelpDot>{help}</HelpDot>}
+	</div>
+);
+
+/**
+ * Square toggle tile. In a palette with no hue, ON is carried by inverting the
+ * surface entirely — the strongest signal available — rather than by a coloured
+ * switch. Three of these wrap down to two, then one, as the panel narrows.
+ */
+const ToggleTile = ({ icon: Icon, label, help, checked, onChange }) => (
+	<label
+		className={`group relative flex min-w-[96px] flex-1 basis-[96px] cursor-pointer select-none flex-col justify-between gap-2 rounded-lg border p-2.5 transition-all duration-150 focus-within:ring-1 focus-within:ring-ring ${
+			checked ? "border-foreground bg-foreground text-background" : "border-border bg-card text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+		}`}
+	>
+		<input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="sr-only" />
+
+		<div className="flex items-start justify-between gap-1">
+			<Icon className="h-3.5 w-3.5 shrink-0" />
+			{help && <HelpDot>{help}</HelpDot>}
+		</div>
+
+		<div className="flex flex-col gap-1">
+			<span className="text-[10px] font-bold leading-tight">{label}</span>
+			<span className={`font-mono text-[9px] font-bold uppercase tracking-widest ${checked ? "opacity-70" : "opacity-50"}`}>{checked ? "On" : "Off"}</span>
+		</div>
+	</label>
+);
 
 export const SettingsDialog = ({
 	showSettings,
@@ -137,6 +222,15 @@ export const SettingsDialog = ({
 	fetchApiBalance,
 	saveConfiguration,
 	saveSuccess,
+	saveError,
+	isSaving,
+	supportsImages,
+	setSupportsImages,
+	storageUsage,
+	storageBlocked,
+	handleFreeUpSpace,
+	handleCompactSession,
+	sessionSizes,
 	chatMetadata,
 	editingSessionKey,
 	setEditingSessionKey,
@@ -158,10 +252,56 @@ export const SettingsDialog = ({
 		<div className={`absolute right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border bg-[#07090e] shadow-2xl transition-transform duration-300 ease-out ${showSettings ? "translate-x-0" : "translate-x-full"}`}>
 			<div className="flex items-center justify-between border-b border-border bg-[#0e1118]/80 p-3">
 				<h2 className="text-xs font-bold tracking-tight text-zinc-200">Configuration Settings</h2>
-				<Button variant="ghost" size="icon-xs" onClick={() => setShowSettings(false)} className="border border-zinc-800/40 text-zinc-400 hover:text-white">
+				<Button variant="ghost" size="icon-xs" onClick={() => setShowSettings(false)} className="border border-zinc-800/40 text-zinc-400 hover:text-foreground">
 					<X className="h-3.5 w-3.5" />
 				</Button>
 			</div>
+
+			{/* Storage budget lives above the tabs: it governs whether ANY tab's changes
+			    can be written at all, so it is panel chrome, not a preference. */}
+			{storageUsage &&
+				(() => {
+					const ratio = Math.min(storageUsage.ratio || 0, 1);
+					const pct = Math.round(ratio * 100);
+					const isCritical = storageBlocked || ratio >= CRITICAL_RATIO;
+					const isWarn = !isCritical && ratio >= WARN_RATIO;
+					const barColor = isCritical ? "bg-rose-500" : isWarn ? "bg-amber-500" : "bg-foreground/70";
+					const textColor = isCritical ? "text-rose-400" : isWarn ? "text-amber-400" : "text-zinc-400";
+
+					return (
+						<div className="shrink-0 border-b border-border bg-zinc-950/20 px-3 py-2">
+							<div className="flex items-center justify-between gap-2">
+								<div className="flex min-w-0 items-center gap-1.5">
+									<Database className="h-3 w-3 shrink-0 text-zinc-500" />
+									<span className="font-mono text-[9px] font-bold uppercase tracking-widest text-zinc-500">Storage</span>
+									<HelpDot>Chrome caps extension storage at 10 MB. Over-quota writes fail outright, so chats pause rather than pretend to save. Delete or compact sessions in the Sessions tab to recover space.</HelpDot>
+								</div>
+								<div className="flex shrink-0 items-center gap-2">
+									<span className="font-mono text-[10px] text-zinc-500">
+										{formatBytes(storageUsage.bytes)} / {formatBytes(storageUsage.quota)}
+									</span>
+									<span className={`font-mono text-[10px] font-bold tabular-nums ${textColor}`}>{pct}%</span>
+									{(isWarn || isCritical) && (
+										<button type="button" onClick={handleFreeUpSpace} className="cursor-pointer rounded border border-border bg-transparent px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-foreground transition-colors hover:border-foreground">
+											Free up
+										</button>
+									)}
+								</div>
+							</div>
+
+							<div className="mt-1.5 h-1 w-full overflow-hidden rounded-full border border-border bg-zinc-950">
+								<div className={`h-full rounded-full transition-all duration-300 ${barColor}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+							</div>
+
+							{storageBlocked && (
+								<span className="mt-1.5 flex items-start gap-1 text-[10px] leading-normal text-rose-400">
+									<AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" />
+									<span>Storage is full. Chats are paused until you free some space.</span>
+								</span>
+							)}
+						</div>
+					);
+				})()}
 
 			{/* Tab selection for Settings Preferences vs Tools vs Saved Sessions */}
 			<div className="border-zinc-850 flex shrink-0 border-b bg-zinc-950/20 px-2 py-1">
@@ -183,9 +323,9 @@ export const SettingsDialog = ({
 				{settingsTab === "preferences" ? (
 					<>
 						<div className="flex flex-col gap-1.5">
-							<label className="text-[11px] font-bold text-zinc-400">Deepseek API Key</label>
+							<FieldLabel help="Your provider key. Stored locally in this browser only and sent straight to the endpoint below — it never passes through any server of ours.">Deepseek API Key</FieldLabel>
 							<div className="relative flex items-center">
-								<Input type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="placeholder-zinc-750 border-zinc-800 bg-zinc-950/40 pr-10 font-mono text-xs text-white focus-visible:ring-blue-600/35" />
+								<Input type={showKey ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="placeholder-zinc-750 border-zinc-800 bg-zinc-950/40 pr-10 font-mono text-xs text-foreground focus-visible:ring-blue-600/35" />
 								<Button type="button" variant="ghost" size="icon-xs" onClick={() => setShowKey(!showKey)} className="text-zinc-550 absolute right-1 hover:bg-transparent hover:text-zinc-200">
 									{showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
 								</Button>
@@ -193,7 +333,7 @@ export const SettingsDialog = ({
 
 							{/* Test API Key Connection Button & Status */}
 							<div className="mt-1 flex items-center justify-between">
-								<Button type="button" variant="outline" size="xs" onClick={handleTestApiKey} disabled={isTestingKey} className="hover:bg-zinc-850 h-6 rounded border-zinc-800 bg-zinc-900/60 px-2.5 text-[11px] font-bold text-zinc-300 transition-all hover:text-white">
+								<Button type="button" variant="outline" size="xs" onClick={handleTestApiKey} disabled={isTestingKey} className="hover:bg-zinc-850 h-6 rounded border-zinc-800 bg-zinc-900/60 px-2.5 text-[11px] font-bold text-zinc-300 transition-all hover:text-foreground">
 									{isTestingKey ? (
 										<>
 											<Loader2 className="mr-1 h-3 w-3 animate-spin text-blue-500" />
@@ -243,13 +383,13 @@ export const SettingsDialog = ({
 						)}
 
 						<div className="flex flex-col gap-1.5">
-							<label className="text-[11px] font-bold text-zinc-400">API Endpoint</label>
-							<Input type="text" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35" />
+							<FieldLabel help="Any OpenAI-compatible base URL. Point it at DeepSeek, a self-hosted gateway, or a router. Include the version path if the provider needs one.">API Endpoint</FieldLabel>
+							<Input type="text" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} className="border-zinc-800 bg-zinc-950/40 text-xs text-foreground placeholder-zinc-700 focus-visible:ring-blue-600/35" />
 						</div>
 
 						<div className="flex flex-col gap-1.5 relative">
 							<div className="flex items-center justify-between">
-								<label className="text-[11px] font-bold text-zinc-400">Preferred AI Model</label>
+								<FieldLabel help="Type any model id, or hit Fetch Models to list what the endpoint offers. Custom ids are accepted — the list is a convenience, not a restriction.">Preferred AI Model</FieldLabel>
 								<button
 									type="button"
 									onClick={() => fetchAvailableModels()}
@@ -273,7 +413,7 @@ export const SettingsDialog = ({
 										setTimeout(() => setShowDropdown(false), 200);
 									}}
 									placeholder="Search or enter model name (e.g. gpt-4o)"
-									className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-white placeholder-zinc-700 focus-visible:ring-blue-600/35"
+									className="h-8 w-full border-zinc-800 bg-zinc-950/40 text-xs text-foreground placeholder-zinc-700 focus-visible:ring-blue-600/35"
 								/>
 								{showDropdown && (
 									<div className="absolute left-0 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 p-1 shadow-xl z-50">
@@ -316,86 +456,96 @@ export const SettingsDialog = ({
 							</div>
 						</div>
 
-						{/* V4 Thinking Settings */}
-						<div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-							<div className="flex items-center justify-between">
-								<div className="flex flex-col gap-0.5">
-									<label className="text-[11px] font-bold text-zinc-400">Enable Deep Thinking</label>
-									<span className="text-[11px] text-zinc-500">Stream reasoning CoT block</span>
-								</div>
-								<Switch checked={enableThinking} onCheckedChange={(checked) => setEnableThinking(checked)} />
+						{/* Three switches, one row, square tiles. They wrap to 2-up then 1-up as
+						    the panel narrows. All sub-copy has moved into the help tooltips. */}
+						<div className="flex flex-wrap gap-2">
+							<ToggleTile
+								icon={ImageIcon}
+								label="Image model"
+								checked={supportsImages}
+								onChange={setSupportsImages}
+								help="Turn on only if the selected model accepts images. Adds the screenshot tools and sends page captures to the model. Text-only models will reject image content, and vision requests cost noticeably more tokens."
+							/>
+							<ToggleTile
+								icon={Sparkles}
+								label="Deep thinking"
+								checked={enableThinking}
+								onChange={setEnableThinking}
+								help="Streams the model's chain-of-thought block above its answer. Thinking mode still supports concurrent DOM tool calling."
+							/>
+							<ToggleTile
+								icon={Terminal}
+								label="Tool detail"
+								checked={showToolCallsDetail}
+								onChange={setShowToolCallsDetail}
+								help="Shows every tool call step by step in the transcript instead of collapsing them into a single summary line."
+							/>
+						</div>
+
+						{enableThinking && (
+							<div className="animate-fade-in flex flex-col gap-1.5">
+								<FieldLabel help="How long the model is allowed to reason before answering. Higher effort is slower and costs more tokens, but handles multi-step browser tasks far better.">Reasoning Effort</FieldLabel>
+								<Select value={reasoningEffort} onValueChange={(val) => setReasoningEffort(val)}>
+									<SelectTrigger className="h-7 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
+										<SelectValue placeholder="Select effort" />
+									</SelectTrigger>
+									<SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-300">
+										<SelectItem value="low" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
+											Low
+										</SelectItem>
+										<SelectItem value="medium" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
+											Medium
+										</SelectItem>
+										<SelectItem value="high" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
+											High (Recommended)
+										</SelectItem>
+									</SelectContent>
+								</Select>
 							</div>
+						)}
 
-							{enableThinking && (
-								<div className="animate-fade-in mt-2 flex flex-col gap-1.5">
-									<label className="text-[11px] font-bold text-zinc-400">Reasoning Effort</label>
-									<Select value={reasoningEffort} onValueChange={(val) => setReasoningEffort(val)}>
-										<SelectTrigger className="h-7 w-full border-zinc-800 bg-zinc-950/40 text-xs text-zinc-300 focus-visible:ring-blue-600/35">
-											<SelectValue placeholder="Select effort" />
-										</SelectTrigger>
-										<SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-300">
-											<SelectItem value="low" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-												Low
-											</SelectItem>
-											<SelectItem value="medium" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-												Medium
-											</SelectItem>
-											<SelectItem value="high" className="text-xs focus:bg-blue-600/10 focus:text-blue-400">
-												High (Recommended)
-											</SelectItem>
-										</SelectContent>
-									</Select>
-									<span className="flex items-start gap-1 text-[11px] leading-normal text-amber-500/70">
-										<AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-										<span>Thinking Mode supports dynamic concurrent active DOM tool calling under V4 API specifications.</span>
-									</span>
+											{/* Set once, rarely touched — folded away so it stops dominating the panel. */}
+						<details className="group rounded-xl border border-zinc-800 bg-zinc-900/40 open:pb-3">
+							<summary className="flex cursor-pointer select-none list-none items-center justify-between gap-2 p-3">
+								<div className="flex items-center gap-1.5">
+									<span className="text-[11px] font-bold text-zinc-400">Agent System Instructions</span>
+									<HelpDot>The agent&apos;s standing brief — its persona, tone, and house rules. Prepended to every request. Mostly a one-time setup; leave it alone unless you want to change how the agent behaves across all chats.</HelpDot>
 								</div>
-							)}
-						</div>
-
-						{/* Tool Calls Settings */}
-						<div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-							<div className="flex items-center justify-between">
-								<div className="flex flex-col gap-0.5">
-									<label className="text-[11px] font-bold text-zinc-400">Detailed Tool Calls</label>
-									<span className="text-[11px] text-zinc-500">Show step-by-step action details</span>
-								</div>
-								<Switch checked={showToolCallsDetail} onCheckedChange={(checked) => setShowToolCallsDetail(checked)} />
+								<ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180" />
+							</summary>
+							<div className="px-3">
+								<Textarea rows={4} value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} className="h-[18vh] resize-none border border-zinc-800 bg-zinc-950/40 font-sans text-xs leading-relaxed text-zinc-300 focus-visible:ring-blue-600/35" />
 							</div>
-						</div>
-
-						<div className="flex flex-col gap-1.5">
-							<label className="text-[11px] font-bold text-zinc-400">Agent System Instructions</label>
-							<Textarea rows={4} value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} className="h-[15vh] resize-none border border-zinc-800 bg-zinc-950/40 font-sans text-xs leading-relaxed text-zinc-300 focus-visible:ring-blue-600/35" />
-						</div>
+						</details>
 
 						<div className="flex gap-2">
 							<div className="flex w-[30%] flex-col gap-1.5">
-								<label className="text-[11px] font-bold text-zinc-400">Temp</label>
-								<Input type="number" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
+								<FieldLabel help="Sampling temperature, 0 to 2. Low values keep the agent literal and repeatable, which is what browser automation wants. Ignored while deep thinking is on.">Temp</FieldLabel>
+								<Input type="number" min="0" max="2" step="0.1" value={temperature} onChange={(e) => setTemperature(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-foreground focus-visible:ring-blue-600/35" />
 							</div>
 							<div className="flex w-[35%] flex-col gap-1.5">
-								<label className="text-[11px] font-bold text-zinc-400">Max Tokens</label>
-								<Input type="number" min="1" max="8192" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
+								<FieldLabel help="Ceiling on the length of a single reply. Raise it if long page summaries are getting cut off mid-sentence.">Max Tokens</FieldLabel>
+								<Input type="number" min="1" max="8192" value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-foreground focus-visible:ring-blue-600/35" />
 							</div>
 							<div className="flex w-[35%] flex-col gap-1.5">
-								<label className="text-[11px] font-bold text-zinc-400">Max Steps</label>
-								<Input type="number" min="1" max="100" value={maxIterations} onChange={(e) => setMaxIterations(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-white focus-visible:ring-blue-600/35" />
+								<FieldLabel help="How many tool calls the agent may chain before it must stop and report back. The safety brake on a task that loops.">Max Steps</FieldLabel>
+								<Input type="number" min="1" max="100" value={maxIterations} onChange={(e) => setMaxIterations(e.target.value)} className="border-zinc-800 bg-zinc-950/40 pr-1 text-xs text-foreground focus-visible:ring-blue-600/35" />
 							</div>
 						</div>
 
-						<Button onClick={saveConfiguration} className="mt-4 w-full cursor-pointer rounded-lg bg-blue-600 py-2 text-center text-xs font-bold text-white hover:bg-blue-500">
-							Save Configuration
-						</Button>
-
-						{saveSuccess && <div className="animate-fade-in text-center text-xs text-emerald-400">✓ Configuration updated!</div>}
 					</>
 				) : settingsTab === "tools" ? (
 					<div className="flex flex-col gap-3 p-1">
 						<div className="text-[11px] text-zinc-400 leading-relaxed mb-1 border-b border-zinc-850 pb-2 text-left">
 							Toggle individual capabilities to control the agent's action boundaries and privacy permissions. Disabled tools will be completely hidden from the AI models.
 						</div>
-						{AVAILABLE_TOOLS.map((tool) => (
+						{!supportsImages && (
+							<div className="flex items-start gap-1.5 rounded-lg border border-zinc-850 bg-zinc-950/60 p-2.5 text-[11px] leading-normal text-zinc-500">
+								<AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-zinc-600" />
+								<span>Screenshot tools are hidden. Turn on &quot;Image-capable model&quot; in Preferences to enable them.</span>
+							</div>
+						)}
+						{AVAILABLE_TOOLS.filter((tool) => !tool.visionOnly || supportsImages).map((tool) => (
 							<div key={tool.key} className="flex items-start justify-between gap-3 p-2.5 border border-zinc-900 bg-zinc-950/40 rounded-xl transition-colors hover:border-zinc-800/80">
 								<div className="flex flex-col gap-1 flex-1 text-left">
 									<div className="flex flex-wrap items-center gap-1.5">
@@ -447,6 +597,7 @@ export const SettingsDialog = ({
 								.map((session) => {
 									const dateStr = new Date(session.timestamp).toLocaleString();
 									const isActive = getChatKey() === session.key;
+									const sessionBytes = (sessionSizes && sessionSizes[session.key]) || 0;
 
 									return (
 										<div key={session.key} onClick={() => handleLoadSession(session)} className={`group relative flex cursor-pointer select-none flex-col gap-2.5 rounded-xl border p-3 transition-all duration-200 ${isActive ? "border-blue-500/40 bg-blue-600/5 shadow-[0_0_10px_rgba(59,130,246,0.05)] hover:border-blue-500/60" : "border-zinc-900 bg-zinc-950/40 hover:border-zinc-800/80 hover:bg-zinc-900/10"}`}>
@@ -471,7 +622,7 @@ export const SettingsDialog = ({
 												) : (
 													<div className="flex flex-1 items-center gap-2 truncate">
 														<span className="shrink-0"><History className="h-3.5 w-3.5 text-blue-500 shrink-0" /></span>
-														<h3 className={`truncate text-[11px] font-bold ${isActive ? "text-blue-400" : "text-zinc-200 group-hover:text-white"}`} title={session.title}>
+														<h3 className={`truncate text-[11px] font-bold ${isActive ? "text-blue-400" : "text-zinc-200 group-hover:text-foreground"}`} title={session.title}>
 															{session.title}
 														</h3>
 														<Tooltip>
@@ -521,7 +672,24 @@ export const SettingsDialog = ({
 											) : null}
 
 											<div className="mt-1 flex items-center justify-between text-[11px] text-zinc-600">
-												<span className="font-mono text-[11px] uppercase tracking-wider text-zinc-500 font-bold select-none">CONVERSATION SESSION</span>
+												<div className="flex items-center gap-1.5">
+													<span className="font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-500 select-none">{formatBytes(sessionBytes)}</span>
+													{sessionBytes > 200 * 1024 && (
+														<Tooltip>
+															<TooltipTrigger asChild>
+																<button
+																	onClick={(e) => handleCompactSession(session.key, e)}
+																	className="cursor-pointer rounded border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-500/80 transition-colors hover:border-amber-500/40 hover:text-amber-400"
+																>
+																	Compact
+																</button>
+															</TooltipTrigger>
+															<TooltipContent>
+																<span>Shorten long tool results in this session to reclaim space</span>
+															</TooltipContent>
+														</Tooltip>
+													)}
+												</div>
 												<span className="font-sans font-medium">{dateStr}</span>
 											</div>
 
@@ -538,6 +706,44 @@ export const SettingsDialog = ({
 					</div>
 				)}
 			</div>
+
+			{/* Sticky action bar. Saving keeps the panel open and reports its own state —
+			    closing a settings drawer on save hides whether the write actually landed. */}
+			{settingsTab === "preferences" && (
+				<div className="shrink-0 border-t border-border bg-card p-3">
+					{saveError && (
+						<div className="animate-fade-in mb-2 flex items-start gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2.5 text-[11px] leading-normal text-rose-300">
+							<ShieldAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-rose-400" />
+							<span>{saveError}</span>
+						</div>
+					)}
+
+					<Button
+						onClick={saveConfiguration}
+						disabled={isSaving}
+						className={`w-full cursor-pointer rounded-lg py-2 text-center text-xs font-bold transition-all duration-200 disabled:opacity-60 ${
+							saveSuccess ? "bg-foreground/15 text-foreground ring-1 ring-inset ring-foreground/35" : "bg-foreground text-background hover:bg-foreground/85"
+						}`}
+					>
+						{isSaving ? (
+							<>
+								<Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+								Saving…
+							</>
+						) : saveSuccess ? (
+							<>
+								<Check className="mr-1.5 h-3.5 w-3.5" />
+								Saved
+							</>
+						) : (
+							<>
+								<Save className="mr-1.5 h-3.5 w-3.5" />
+								Save Configuration
+							</>
+						)}
+					</Button>
+				</div>
+			)}
 		</div>
 	);
 };
