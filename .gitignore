@@ -26,3 +26,12 @@ dist-ssr
 
 .antigravitycli
 data/
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Local working notes, not part of the shipped extension
+docs/
+Claude.md
