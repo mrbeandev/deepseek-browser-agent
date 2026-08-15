@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Agent Workspace</title>
+		<link rel="icon" href="icons/icon32.png" />
+		<style>
+			:root {
+				--bg: #ffffff;
+				--panel: #f8fafc;
+				--border: #e4e4e7;
+				--text: #18181b;
+				--muted: #71717a;
+				--brand: #2563eb;
+				--brand-soft: rgba(37, 99, 235, 0.08);
+				--warn: #b45309;
+				--warn-soft: rgba(245, 158, 11, 0.1);
+				--warn-border: rgba(245, 158, 11, 0.35);
+			}
+
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #07090e;
+					--panel: #0e1118;
+					--border: #27272a;
+					--text: #f4f4f5;
+					--muted: #a1a1aa;
+					--brand: #3b82f6;
+					--brand-soft: rgba(59, 130, 246, 0.1);
+					--warn: #fbbf24;
+					--warn-soft: rgba(245, 158, 11, 0.08);
+					--warn-border: rgba(245, 158, 11, 0.25);
+				}
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				margin: 0;
+				min-height: 100vh;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 32px 20px;
+				background: var(--bg);
+				color: var(--text);
+				font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+				-webkit-font-smoothing: antialiased;
+			}
+
+			.card {
+				width: 100%;
+				max-width: 520px;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				text-align: center;
+				gap: 18px;
+			}
+
+			.logo {
+				width: 72px;
+				height: 72px;
+				border-radius: 16px;
+				background: var(--brand-soft);
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+
+			.logo img {
+				width: 48px;
+				height: 48px;
+				object-fit: contain;
+			}
+
+			h1 {
+				margin: 0;
+				font-size: 20px;
+				font-weight: 800;
+				letter-spacing: -0.01em;
+			}
+
+			.lede {
+				margin: 0;
+				font-size: 14px;
+				line-height: 1.6;
+				color: var(--muted);
+				max-width: 42ch;
+			}
+
+			.notice {
+				width: 100%;
+				display: flex;
+				gap: 10px;
+				align-items: flex-start;
+				text-align: left;
+				padding: 14px 16px;
+				border-radius: 12px;
+				border: 1px solid var(--warn-border);
+				background: var(--warn-soft);
+				font-size: 13px;
+				line-height: 1.6;
+			}
+
+			.notice svg {
+				flex-shrink: 0;
+				margin-top: 2px;
+				color: var(--warn);
+			}
+
+			.notice strong {
+				color: var(--warn);
+			}
+
+			.hint {
+				width: 100%;
+				padding: 14px 16px;
+				border-radius: 12px;
+				border: 1px solid var(--border);
+				background: var(--panel);
+				font-size: 13px;
+				line-height: 1.6;
+				color: var(--muted);
+				text-align: left;
+			}
+
+			.hint strong {
+				color: var(--text);
+				font-weight: 600;
+			}
+
+			footer {
+				font-size: 11px;
+				color: var(--muted);
+				opacity: 0.8;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+				font-weight: 700;
+			}
+		</style>
+	</head>
+	<body>
+		<main class="card">
+			<div class="logo"><img src="icons/icon128.png" alt="Deepseek Browser Agent" /></div>
+
+			<h1>This is the agent's workspace</h1>
+			<p class="lede">
+				The Deepseek Browser Agent works only inside this tab group. Pages it opens appear here, and
+				everything outside the group stays private.
+			</p>
+
+			<div class="notice">
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+					<path d="M12 9v4" />
+					<path d="M12 17h.01" />
+				</svg>
+				<span><strong>Please keep this tab open.</strong> Closing it, or closing the group, ends the agent's workspace and it will have to start a new one.</span>
+			</div>
+
+			<div class="hint">
+				<strong>You can start chatting now.</strong> Ask the agent in the side panel and it will open the
+				pages it needs right here. To hand it a page you already have open, drag that tab into this group.
+			</div>
+
+			<footer>Deepseek Browser Agent</footer>
+		</main>
+	</body>
+</html>
