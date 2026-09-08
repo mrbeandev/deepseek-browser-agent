@@ -1,4 +1,4 @@
-// The agent's workspace is a native Chrome tab group living in the user's own window.
+// The agent's workspace is a native Chrome tab group in its own Chrome window.
 //
 // Group membership IS the permission boundary: the agent can see and act on exactly the tabs
 // returned by chrome.tabs.query({ groupId }), and nothing else. The user grants access by
@@ -50,38 +50,19 @@ export async function isInGroup(groupId, tabId) {
 	}
 }
 
-async function resolveWindowId() {
-	try {
-		const win = await chrome.windows.getCurrent();
-		return win?.id;
-	} catch {
-		return undefined;
-	}
-}
-
-// Creates the group in the side panel's own window, holding it open with the workspace page.
-// The tab is inactive so that starting the agent never pulls the user away from what they are
-// looking at.
+// Creates the group in its OWN Chrome window.
+//
+// A separate window is what makes the agent visible without being intrusive: it can activate
+// its own tabs freely (so switch_to_tab actually shows something, and screenshots stop
+// flickering the user's view) while never touching what the user is looking at.
 export async function createAgentGroup() {
-	const windowId = await resolveWindowId();
+	const win = await chrome.windows.create({ url: WORKSPACE_URL, focused: false });
+	const tab = win.tabs[0];
 
-	const tab = await chrome.tabs.create({
-		url: WORKSPACE_URL,
-		active: false,
-		...(windowId ? { windowId } : {}),
-	});
+	const groupId = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: win.id } });
+	await chrome.tabGroups.update(groupId, { title: AGENT_GROUP_TITLE, color: AGENT_GROUP_COLOR });
 
-	const groupId = await chrome.tabs.group({
-		tabIds: [tab.id],
-		...(windowId ? { createProperties: { windowId } } : {}),
-	});
-
-	await chrome.tabGroups.update(groupId, {
-		title: AGENT_GROUP_TITLE,
-		color: AGENT_GROUP_COLOR,
-	});
-
-	return { groupId, tabId: tab.id, windowId: tab.windowId };
+	return { groupId, tabId: tab.id, windowId: win.id };
 }
 
 // Returns a live group id, recreating the group if the stored one is stale.

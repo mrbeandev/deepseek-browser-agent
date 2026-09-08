@@ -1855,7 +1855,7 @@ END OF DEBUG COMPILATION
 				type: "function",
 				function: {
 					name: "switch_to_tab",
-					description: "Point yourself at a different tab inside your tab group. This changes which tab your page tools act on; it does NOT bring the tab to the foreground, so the user is never interrupted. Only tabs in your group can be targeted.",
+					description: "Switch to a different tab inside your tab group. This changes which tab your page tools act on. Your group has its own Chrome window, so this never disturbs what the user is looking at. Only tabs in your group can be targeted.",
 					parameters: {
 						type: "object",
 						properties: {
@@ -2011,7 +2011,7 @@ END OF DEBUG COMPILATION
 						: `\n[USER IS CURRENTLY ON: "${userTab.title}" — ${userTab.url}. This tab is NOT yours yet: you cannot read or act on it. If the user asks you to work on "this page" or "this tab", call use_current_tab to move it into your group first.]`;
 				}
 
-				const tabContextStr = `[WORKSPACE: you operate only inside the "${AGENT_GROUP_TITLE}" Chrome tab group. You cannot read or act on any tab outside it. The user shares a tab by dragging it into the group.]\n[TABS SHARED WITH YOU: ${groupTabsRef.current.length}]\n[CURRENT TAB ID: ${activeTabIdRef.current}]\n[CURRENT TAB URL: ${activeUrlRef.current}]\n[CURRENT TAB TITLE: ${activeTabTitleRef.current}]${onPlaceholder ? "\n[NOTE: your current tab is the empty workspace placeholder. It has no content to read. Use open_tab or navigate_to to load a real page before using any page tool.]" : ""}${userTabLine}`;
+				const tabContextStr = `[WORKSPACE: you operate only inside the "${AGENT_GROUP_TITLE}" tab group, which has its own Chrome window. You cannot read or act on any tab outside it. The user shares a tab by dragging it into the group.]\n[TABS SHARED WITH YOU: ${groupTabsRef.current.length}]\n[CURRENT TAB ID: ${activeTabIdRef.current}]\n[CURRENT TAB URL: ${activeUrlRef.current}]\n[CURRENT TAB TITLE: ${activeTabTitleRef.current}]${onPlaceholder ? "\n[NOTE: your current tab is the empty workspace placeholder. It has no content to read. Use open_tab or navigate_to to load a real page before using any page tool.]" : ""}${userTabLine}`;
 				payloadMessages.push({ role: "system", content: tabContextStr });
 
 				if (extraSystemContext) {
@@ -2587,14 +2587,14 @@ END OF DEBUG COMPILATION
 			setActiveTabId(targetTabId);
 		}
 
-		let previouslyActiveId = null;
 		try {
-			const [wasActive] = await chrome.tabs.query({ active: true, windowId });
-			if (wasActive && wasActive.id !== targetTabId) {
-				previouslyActiveId = wasActive.id;
-				await chrome.tabs.update(targetTabId, { active: true });
-				await new Promise((r) => setTimeout(r, 250));
-			}
+			// captureVisibleTab only sees a window's active tab. The agent window is its own,
+			// so activating there is free — and leaving it active keeps it consistent with
+			// switch_to_tab instead of silently flipping back.
+			// ponytail: if the user shared a tab from their own window, this activates in that
+			// window. Restore the previous tab here if that turns out to matter.
+			await chrome.tabs.update(targetTabId, { active: true }).catch(() => {});
+			await new Promise((r) => setTimeout(r, 250));
 
 			// A crop is re-encoded afterwards, so capture it losslessly: JPEG here plus JPEG
 			// again after cropping would compress the same pixels twice.
@@ -2649,14 +2649,6 @@ END OF DEBUG COMPILATION
 			};
 		} catch (err) {
 			return { success: false, error: err.message };
-		} finally {
-			if (previouslyActiveId) {
-				try {
-					await chrome.tabs.update(previouslyActiveId, { active: true });
-				} catch {
-					// The tab went away while we were capturing
-				}
-			}
 		}
 	};
 
@@ -2702,16 +2694,15 @@ END OF DEBUG COMPILATION
 				return outOfScopeError(numericTabId);
 			}
 
-			// Target selection, not activation. The user's foreground tab is left alone.
 			activeTabIdRef.current = numericTabId;
 			setActiveTabId(numericTabId);
+			// Safe to actually show it: the group has its own window, so this never disturbs
+			// whatever the user is looking at.
+			await chrome.tabs.update(numericTabId, { active: true }).catch(() => {});
 			await trackAgentTab();
 
 			const tab = await chrome.tabs.get(numericTabId);
-			return {
-				success: true,
-				message: `Now targeting tab ${numericTabId} ("${tab.title}"). It was not brought to the foreground — the user's view is unchanged.`,
-			};
+			return { success: true, message: `Now on tab ${numericTabId} ("${tab.title}").` };
 		}
 
 		if (toolName === "open_tab") {
