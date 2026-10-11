@@ -93,7 +93,7 @@ Make sure you have [Node.js](https://nodejs.org/) (v18 or higher) and `npm` inst
 
 ### 2. Clone the Repository
 ```bash
-git clone https://github.com/your-username/deepseek-browser-agent.git
+git clone https://github.com/mrbeandev/deepseek-browser-agent.git
 cd deepseek-browser-agent
 ```
 
